@@ -1,0 +1,13 @@
+{
+  "source_id": "SRC-001",
+  "filename": "example.pdf",
+  "title": "建築設計評圖講義",
+  "source_type": "teacher_pdf",
+  "teacher": "example",
+  "year": 2026,
+  "exam_type": ["design"],
+  "page_count": 48,
+  "has_images": true,
+  "rights_note": "private educational material; do not redistribute",
+  "processing_status": "inventory"
+}
