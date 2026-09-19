@@ -1,0 +1,15 @@
+{
+  "image_id": "IMG-0012",
+  "source_id": "SRC-001",
+  "page": 12,
+  "bbox": {
+    "x": 0.15,
+    "y": 0.32,
+    "w": 0.27,
+    "h": 0.21
+  },
+  "caption": "主要入口與前廣場形成清楚軸線",
+  "topics": ["entrance", "outdoor_space"],
+  "quality": "good_pattern",
+  "linked_knowledge_ids": ["K-000001"]
+}
