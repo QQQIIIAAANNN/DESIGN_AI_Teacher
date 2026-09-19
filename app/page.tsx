@@ -83,7 +83,7 @@ const dimensions = [
 export default function Home() {
   const [imageUrl, setImageUrl] = useState<string>("");
   const [activeId, setActiveId] = useState<number>(1);
-  const [reviewed, setReviewed] = useState(false);
+  const [reviewed, setReviewed] = useState(false);\n  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
 
   const total = useMemo(
     () => dimensions.reduce((sum, item) => sum + Number(item[1]), 0),
@@ -176,10 +176,10 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="drawing-stage">
+          <div\n            className={`drawing-stage ${imageUrl ? "has-image" : ""}`}\n            style={\n              imageSize\n                ? { aspectRatio: `${imageSize.width} / ${imageSize.height}` }\n                : undefined\n            }\n          >
             {imageUrl ? (
               <>
-                <img src={imageUrl} alt="上傳的建築師考試作答圖" />
+                <img\n                  src={imageUrl}\n                  alt="上傳的建築師考試作答圖"\n                  onLoad={(event) =>\n                    setImageSize({\n                      width: event.currentTarget.naturalWidth,\n                      height: event.currentTarget.naturalHeight,\n                    })\n                  }\n                />
                 {reviewed && (
                   <svg
                     className="overlay"
