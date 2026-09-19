@@ -72,3 +72,10 @@ export type DrawingReview = {
   issues: ReviewItem[];
   needsSupplement: boolean;
 };
+
+export type SupplementReviewStatus = "resolved" | "still_uncertain";
+
+export type SupplementReviewResult = {
+  status: SupplementReviewStatus;
+  issue: ReviewItem;
+};
