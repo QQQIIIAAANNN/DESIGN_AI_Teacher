@@ -1,110 +1,19 @@
 "use client";
 
 import { ChangeEvent, useMemo, useState } from "react";
-import type { ReviewItem, ReviewSeverity } from "@/lib/review-schema";
+import type {
+  DrawingReview,
+  ReviewItem,
+  ReviewSeverity
+} from "@/lib/review-schema";
 
-const mockIssues: ReviewItem[] = [
-  {
-    id: "issue-001",
-    kind: "issue",
-    title: "入口與主要廣場關係偏弱",
-    category: "動線 / 戶外空間",
-    severity: "high",
-    scoreImpact: -4,
-    confidence: 0.91,
-    visibilityStatus: "clear",
-    description:
-      "主要人行入口與前方開放空間沒有形成清楚的導引關係，評圖時容易被判讀為空間主次不明。",
-    suggestion:
-      "強化入口前緩衝廣場，讓鋪面、植栽與入口軸線形成同一套構圖，並避免車行動線切過主要步行路徑。",
-    bbox: { x: 0.08, y: 0.12, w: 0.28, h: 0.26 },
-    redline: {
-      type: "line",
-      x1: 0.1,
-      y1: 0.42,
-      x2: 0.42,
-      y2: 0.24
-    }
-  },
-  {
-    id: "issue-002",
-    kind: "issue",
-    title: "量體轉折造成轉角空間浪費",
-    category: "空間配置",
-    severity: "medium",
-    scoreImpact: -2,
-    confidence: 0.84,
-    visibilityStatus: "clear",
-    description:
-      "建築轉角出現難以使用的剩餘空間，若沒有明確景觀或機能設定，會削弱平面完整性。",
-    suggestion:
-      "可將牆線外推並整合成完整矩形空間，或明確設定為採光庭、植栽庭，使其成為設計語彙而不是殘餘空間。",
-    bbox: { x: 0.57, y: 0.31, w: 0.24, h: 0.22 },
-    redline: {
-      type: "rect",
-      x: 0.55,
-      y: 0.28,
-      w: 0.29,
-      h: 0.28
-    }
-  },
-  {
-    id: "issue-003",
-    kind: "issue",
-    title: "景觀綠帶缺乏連續性",
-    category: "景觀 / 永續",
-    severity: "low",
-    scoreImpact: -1,
-    confidence: 0.79,
-    visibilityStatus: "clear",
-    description:
-      "植栽配置較零碎，沒有形成遮蔭、導引或基地邊界緩衝的連續系統。",
-    suggestion:
-      "將零散樹穴整理成一條連續綠帶，串接主要步行路徑與戶外停留空間。",
-    bbox: { x: 0.16, y: 0.66, w: 0.4, h: 0.2 },
-    redline: {
-      type: "polyline",
-      points: [
-        [0.14, 0.8],
-        [0.28, 0.69],
-        [0.45, 0.82],
-        [0.62, 0.7]
-      ]
-    }
-  },
-  {
-    id: "clarity-001",
-    kind: "clarity_request",
-    title: "樓梯與鄰接空間需要局部補圖",
-    category: "圖面清晰度",
-    severity: "info",
-    scoreImpact: null,
-    confidence: 0.34,
-    visibilityStatus: "illegible",
-    description:
-      "此區線條與標註在整張圖縮放後不足以可靠判讀。系統可以辨識出疑似樓梯與走道交界，但不應直接猜測尺寸、梯向或門扇關係。",
-    suggestion:
-      "請補上此區的高解析局部圖，再針對樓梯動線、淨寬、出入口與無障礙關係進行局部精審。",
-    bbox: { x: 0.72, y: 0.57, w: 0.18, h: 0.16 },
-    cropRequest: {
-      reason: "局部解析度不足，牆線、樓梯線與尺寸文字互相黏連。",
-      instructions: [
-        "保留框選區域四周約 10%～20% 的上下文，不要只裁一個小方塊。",
-        "讓牆線、門線、樓梯方向與尺寸文字可辨識。",
-        "若原圖本身失焦，請重新近拍該區，而不是單純數位放大。"
-      ],
-      reviewTargets: ["樓梯方向", "走道與門扇關係", "淨寬", "無障礙連續性"]
-    }
-  }
+const defaultDimensions = [
+  "配置與機能",
+  "動線與分流",
+  "戶外空間",
+  "法規與無障礙",
+  "設計概念與表達"
 ];
-
-const dimensions = [
-  ["配置與機能", 14, 20],
-  ["動線與分流", 12, 20],
-  ["戶外空間", 13, 20],
-  ["法規與無障礙", 15, 20],
-  ["設計概念與表達", 14, 20]
-] as const;
 
 const severityLabels: Record<ReviewSeverity, string> = {
   high: "高",
@@ -119,24 +28,64 @@ function svgValue(value: number) {
 
 export default function Home() {
   const [imageUrl, setImageUrl] = useState("");
-  const [activeId, setActiveId] = useState(mockIssues[0].id);
-  const [reviewed, setReviewed] = useState(false);
+  const [drawingFile, setDrawingFile] = useState<File | null>(null);
+  const [activeId, setActiveId] = useState("");
+  const [review, setReview] = useState<DrawingReview | null>(null);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState("");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [supplements, setSupplements] = useState<Record<string, { name: string; url: string }>>({});
 
-  const total = useMemo(
-    () => dimensions.reduce((sum, item) => sum + Number(item[1]), 0),
-    []
+  const issues = review?.issues ?? [];
+  const activeIssue = useMemo<ReviewItem | undefined>(
+    () => issues.find((issue) => issue.id === activeId),
+    [activeId, issues]
   );
 
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    setDrawingFile(file);
     setImageUrl(URL.createObjectURL(file));
     setImageSize(null);
-    setReviewed(false);
+    setReview(null);
+    setActiveId("");
+    setReviewError("");
     setSupplements({});
+  }
+
+  async function handleReview() {
+    if (!drawingFile || isReviewing) return;
+
+    setIsReviewing(true);
+    setReviewError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("drawing", drawingFile);
+
+      const response = await fetch("/api/review", {
+        method: "POST",
+        body: formData
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "審圖失敗");
+      }
+
+      const nextReview = payload as DrawingReview;
+      setReview(nextReview);
+      setActiveId(nextReview.issues[0]?.id ?? "");
+    } catch (error) {
+      setReviewError(
+        error instanceof Error ? error.message : "審圖流程發生錯誤。"
+      );
+    } finally {
+      setIsReviewing(false);
+    }
   }
 
   function handleSupplementUpload(issueId: string, event: ChangeEvent<HTMLInputElement>) {
@@ -162,7 +111,7 @@ export default function Home() {
             建築設計 × 敷地繪圖，從「哪裡有問題」一路標到「可以怎麼改」。
           </p>
         </div>
-        <div className="status-pill">MVP v0.2 · SVG + 補圖精審</div>
+        <div className="status-pill">MVP v0.3 · API Review Flow</div>
       </header>
 
       <section className="hero-grid">
@@ -171,46 +120,55 @@ export default function Home() {
             <span className="step">01</span>
             <h2>上傳你的練習圖</h2>
             <p>
-              先用完整圖判讀整體，再由系統主動找出需要高解析局部圖的區域。
+              完整圖先做全局判讀，系統再決定哪些區域需要高解析補圖。
             </p>
           </div>
 
           <label className="dropzone">
             <input type="file" accept="image/*" onChange={handleUpload} />
             <strong>{imageUrl ? "更換圖面" : "選擇作答圖"}</strong>
-            <span>建議使用完整掃描或正拍、避免裁切題目邊界</span>
+            <span>{drawingFile ? drawingFile.name : "建議使用完整掃描或正拍"}</span>
           </label>
 
           <button
             className="primary-btn"
-            disabled={!imageUrl}
-            onClick={() => setReviewed(true)}
+            disabled={!drawingFile || isReviewing}
+            onClick={handleReview}
           >
-            開始 AI 審圖
+            {isReviewing ? "AI 審圖中…" : "開始 AI 審圖"}
           </button>
+
+          {reviewError && <p className="error-text">{reviewError}</p>}
         </div>
 
         <div className="score-card">
           <span className="step">02</span>
           <h2>結構化評分</h2>
           <div className="score-big">
-            <strong>{reviewed ? total : "--"}</strong>
+            <strong>{review?.overallScore ?? "--"}</strong>
             <span>/ 100</span>
           </div>
+
           <div className="dimension-list">
-            {dimensions.map(([label, score, max]) => (
-              <div key={label} className="dimension-row">
-                <span>{label}</span>
-                <div className="meter">
-                  <i
-                    style={{
-                      width: reviewed ? `${(Number(score) / Number(max)) * 100}%` : "0%"
-                    }}
-                  />
+            {(review?.dimensions ?? defaultDimensions.map((label) => ({ label }))).map((dimension) => {
+              const hasScore = "score" in dimension;
+
+              return (
+                <div key={dimension.label} className="dimension-row">
+                  <span>{dimension.label}</span>
+                  <div className="meter">
+                    <i
+                      style={{
+                        width: hasScore
+                          ? `${(dimension.score / dimension.maxScore) * 100}%`
+                          : "0%"
+                      }}
+                    />
+                  </div>
+                  <b>{hasScore ? `${dimension.score}/${dimension.maxScore}` : "--"}</b>
                 </div>
-                <b>{reviewed ? `${score}/${max}` : "--"}</b>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>
@@ -250,9 +208,10 @@ export default function Home() {
                     })
                   }
                 />
-                {reviewed && (
+
+                {review && (
                   <svg className="overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    {mockIssues.map((issue, index) => {
+                    {issues.map((issue, index) => {
                       const active = issue.id === activeId;
                       const cls =
                         issue.severity === "high"
@@ -333,6 +292,14 @@ export default function Home() {
               </div>
             )}
           </div>
+
+          {activeIssue && (
+            <div className="active-region-note">
+              <strong>目前選取：</strong>
+              <span>{activeIssue.title}</span>
+              <small>模型信心 {Math.round(activeIssue.confidence * 100)}%</small>
+            </div>
+          )}
         </div>
 
         <aside className="review-panel">
@@ -342,13 +309,13 @@ export default function Home() {
               <h2>審圖意見</h2>
             </div>
             <span className="issue-count">
-              {reviewed ? `${mockIssues.length} 項` : "尚未分析"}
+              {review ? `${issues.length} 項` : "尚未分析"}
             </span>
           </div>
 
           <div className="issue-list">
-            {reviewed ? (
-              mockIssues.map((issue, index) => {
+            {review ? (
+              issues.map((issue, index) => {
                 const supplement = supplements[issue.id];
 
                 return (
@@ -363,7 +330,9 @@ export default function Home() {
                       </span>
                       <span className="category">{issue.category}</span>
                       <b>
-                        {issue.scoreImpact === null ? `${Math.round(issue.confidence * 100)}% 信心` : `${issue.scoreImpact} 分`}
+                        {issue.scoreImpact === null
+                          ? `${Math.round(issue.confidence * 100)}% 信心`
+                          : `${issue.scoreImpact} 分`}
                       </b>
                     </div>
 
@@ -388,7 +357,10 @@ export default function Home() {
                           ))}
                         </div>
 
-                        <label className="crop-upload" onClick={(event) => event.stopPropagation()}>
+                        <label
+                          className="crop-upload"
+                          onClick={(event) => event.stopPropagation()}
+                        >
                           <input
                             type="file"
                             accept="image/*"
@@ -403,7 +375,7 @@ export default function Home() {
                             <img src={supplement.url} alt="使用者補上的局部圖" />
                             <div>
                               <strong>局部圖已補上</strong>
-                              <span>下一步會只針對此區重跑精審，並回寫原始框選位置。</span>
+                              <span>下一步會將這張圖連同原始 bbox 與全圖 context 送入局部精審。</span>
                             </div>
                           </div>
                         )}
@@ -419,7 +391,7 @@ export default function Home() {
               })
             ) : (
               <div className="panel-empty">
-                上傳圖面並執行審圖後，這裡會依嚴重度列出問題、扣分風險、修改方向，以及需要補拍的局部區域。
+                上傳圖面並執行審圖後，這裡會顯示結構化問題、SVG 定位與需要補拍的局部區域。
               </div>
             )}
           </div>
@@ -428,25 +400,25 @@ export default function Home() {
 
       <section className="roadmap">
         <div>
-          <span className="step">NEXT</span>
-          <h2>從一次性審圖，變成會追問的數位審圖老師</h2>
+          <span className="step">ARCHITECTURE</span>
+          <h2>前端已改成真正走 Review API</h2>
         </div>
         <div className="roadmap-grid">
           <article>
-            <strong>Vision Review</strong>
-            <p>先做完整圖的整體判讀，再標記可能需要局部精審的位置。</p>
+            <strong>/api/review</strong>
+            <p>前端以 FormData 上傳完整圖，不再直接依賴頁面內的假資料。</p>
+          </article>
+          <article>
+            <strong>Provider Adapter</strong>
+            <p>目前使用 mock provider，之後可替換 GPT、Gemini 或其他視覺模型。</p>
           </article>
           <article>
             <strong>Clarity Gate</strong>
-            <p>模型看不清楚時必須停止硬猜，輸出補圖範圍、原因與審查目標。</p>
+            <p>結構已支援清晰度、confidence 與 clarity_request。</p>
           </article>
           <article>
             <strong>Crop Re-review</strong>
-            <p>局部圖補上後沿用原始圖 context，只重跑該區並回寫同一個 issue。</p>
-          </article>
-          <article>
-            <strong>Rubric + RAG</strong>
-            <p>將導師講義、歷屆案例與法規作為可追溯的審圖依據。</p>
+            <p>下一個後端節點是把局部圖真正提交到同一 review issue 重審。</p>
           </article>
         </div>
       </section>
