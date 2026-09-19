@@ -1,0 +1,24 @@
+{
+  "knowledge_id": "K-000001",
+  "source_id": "SRC-001",
+  "source_type": "teacher_pdf",
+  "source_title": "example.pdf",
+  "page": 12,
+  "exam_type": "design",
+  "topic": ["circulation", "entrance"],
+  "knowledge_type": "soft_rule",
+  "statement": "主要入口應能由基地主要接近方向快速辨識。",
+  "conditions": ["具明確公共入口的題型"],
+  "exceptions": [],
+  "severity_hint": "high",
+  "reasoning": "入口不清會同時削弱配置、動線與第一印象。",
+  "bad_pattern": "入口藏在量體轉角且缺少廣場或軸線導引。",
+  "good_pattern": "入口與前廣場、鋪面或主要步行軸線形成連續關係。",
+  "remediation": [
+    "調整入口位置",
+    "利用鋪面與景觀形成導引"
+  ],
+  "image_refs": ["IMG-0012"],
+  "quote_or_paraphrase": "paraphrase",
+  "curation_status": "reviewed"
+}
