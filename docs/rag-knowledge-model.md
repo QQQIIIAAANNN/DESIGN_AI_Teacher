@@ -93,7 +93,7 @@ evaluation_rule 再分：
 
 其他 unit_role 的 evaluation_layer 使用 null。
 
-## 13. knowledge_type
+## 5. knowledge_type
 
 必須明確區分：
 
@@ -107,7 +107,7 @@ evaluation_rule 再分：
 
 這是避免 AI 把「老師喜歡」講成「法律規定」的核心欄位。
 
-## 5. 圖像資料模型
+## 6. 圖像資料模型
 
 不要只保存完整頁面。
 
@@ -149,7 +149,7 @@ evaluation_rule 再分：
 }
 ```
 
-## 6. PDF Ingestion Pipeline
+## 7. PDF Ingestion Pipeline
 
 ### Step 1 — Inventory
 
@@ -230,7 +230,7 @@ AI 可以先抽取，但重要 knowledge unit 需要人工確認：
 
 確認後才寫入 retrieval index。
 
-## 7. Retrieval Architecture
+## 8. Retrieval Architecture
 
 建議不要只有一個 vector search。
 
@@ -278,7 +278,7 @@ CLIP / multimodal embedding。
 - repair patterns
 - source provenance
 
-## 8. Agent Query Example
+## 9. Agent Query Example
 
 當 AI 發現「入口不清楚」：
 
@@ -290,7 +290,7 @@ CLIP / multimodal embedding。
 6. 產生批改
 7. source_refs 回傳原始來源
 
-## 9. Chunking 原則
+## 10. Chunking 原則
 
 不要：
 
@@ -306,7 +306,7 @@ CLIP / multimodal embedding。
 - source provenance
 - page + bbox 可追溯
 
-## 10. 建議索引
+## 11. 建議索引
 
 第一階段：
 
@@ -317,7 +317,7 @@ CLIP / multimodal embedding。
 
 可以先用單一 DB 實作，不必一開始分散式。
 
-## 11. 資料品質等級
+## 12. 資料品質等級
 
 每條 knowledge unit 標記：
 
@@ -332,7 +332,7 @@ Agent 的基礎通關準則只允許使用 canonical / reviewed。
 
 raw 資料不得直接變成高信心批改依據。
 
-## 12. 來源可追溯
+## 13. 來源可追溯
 
 每一條最終審圖意見若有使用 RAG，必須保留：
 
