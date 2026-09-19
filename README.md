@@ -27,9 +27,9 @@
 - Clarity Gate / 需補圖狀態
 - 局部圖片補傳 UI
 - Responsive UI
-- GitHub Actions build CI
+- GitHub Actions build CI\n- Server-side `/api/review` endpoint\n- 可替換的 Review Provider adapter
 
-目前審圖內容使用 mock response，先驗證「AI 審圖 + SVG grounding + 補圖精審」的互動模型。
+目前前端已透過 `/api/review` 呼叫 server-side Review Provider。預設 provider 仍為 mock，目的是讓 UI、API contract、SVG grounding 與補圖精審先固定；之後只需要新增 provider adapter 即可接入真正的多模態模型。
 
 ## AI Pipeline
 
