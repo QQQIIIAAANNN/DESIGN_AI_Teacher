@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/QQQIIIAAANNN/DESIGN_AI_Teacher/knowledge/schemas/image-region.schema.json",
+  "title": "DESIGN_AI_Teacher Image Region",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "image_id",
+    "source_id",
+    "bbox",
+    "caption",
+    "topics",
+    "quality",
+    "linked_knowledge_ids"
+  ],
+  "properties": {
+    "image_id": { "type": "string", "minLength": 1 },
+    "source_id": { "type": "string", "minLength": 1 },
+    "page": { "type": ["integer", "null"], "minimum": 1 },
+    "asset_ref": { "type": ["string", "null"] },
+    "bbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "w", "h"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "w": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "h": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
+    "caption": { "type": "string", "minLength": 1 },
+    "topics": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "quality": {
+      "type": "string",
+      "enum": ["good_pattern", "bad_pattern", "correction", "neutral_reference"]
+    },
+    "linked_knowledge_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}
