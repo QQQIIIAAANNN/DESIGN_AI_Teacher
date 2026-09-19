@@ -1,0 +1,37 @@
+{
+  "hard_rule": {
+    "description": "法規、題目明示條件或不可違反的硬限制",
+    "authority": "highest",
+    "requires_source": true
+  },
+  "soft_rule": {
+    "description": "可重複觀察到的評圖原則，但不是法律或唯一解",
+    "authority": "high",
+    "requires_source": true
+  },
+  "heuristic": {
+    "description": "實務或考試中的經驗法則",
+    "authority": "medium",
+    "requires_source": true
+  },
+  "anti_pattern": {
+    "description": "常見失分配置或表達方式",
+    "authority": "medium",
+    "requires_source": true
+  },
+  "repair_pattern": {
+    "description": "常用的最小修改策略",
+    "authority": "medium",
+    "requires_source": true
+  },
+  "precedent": {
+    "description": "高分、低分或其他參考案例中的具體做法",
+    "authority": "contextual",
+    "requires_source": true
+  },
+  "preference": {
+    "description": "特定老師、課程或流派的偏好",
+    "authority": "low",
+    "requires_source": true
+  }
+}
