@@ -4,7 +4,8 @@ import { ChangeEvent, useMemo, useState } from "react";
 import type {
   DrawingReview,
   ReviewItem,
-  ReviewSeverity
+  ReviewSeverity,
+  SupplementReviewResult
 } from "@/lib/review-schema";
 
 const defaultDimensions = [
@@ -22,6 +23,13 @@ const severityLabels: Record<ReviewSeverity, string> = {
   info: "需補圖"
 };
 
+type SupplementState = {
+  name: string;
+  url: string;
+  status: "reviewing" | "resolved" | "error";
+  message?: string;
+};
+
 function svgValue(value: number) {
   return value * 100;
 }
@@ -34,7 +42,7 @@ export default function Home() {
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
-  const [supplements, setSupplements] = useState<Record<string, { name: string; url: string }>>({});
+  const [supplements, setSupplements] = useState<Record<string, SupplementState>>({});
 
   const issues = review?.issues ?? [];
   const activeIssue = useMemo<ReviewItem | undefined>(
@@ -88,17 +96,84 @@ export default function Home() {
     }
   }
 
-  function handleSupplementUpload(issueId: string, event: ChangeEvent<HTMLInputElement>) {
+  async function handleSupplementUpload(
+    issue: ReviewItem,
+    event: ChangeEvent<HTMLInputElement>
+  ) {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file || !review) return;
+
+    const previewUrl = URL.createObjectURL(file);
 
     setSupplements((current) => ({
       ...current,
-      [issueId]: {
+      [issue.id]: {
         name: file.name,
-        url: URL.createObjectURL(file)
+        url: previewUrl,
+        status: "reviewing"
       }
     }));
+
+    try {
+      const formData = new FormData();
+      formData.append("crop", file);
+      formData.append("reviewId", review.reviewId);
+      formData.append("drawingId", review.drawingId);
+      formData.append("issue", JSON.stringify(issue));
+
+      const response = await fetch("/api/review/supplement", {
+        method: "POST",
+        body: formData
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "局部精審失敗");
+      }
+
+      const result = payload as SupplementReviewResult;
+
+      setReview((current) => {
+        if (!current) return current;
+
+        const nextIssues = current.issues.map((currentIssue) =>
+          currentIssue.id === issue.id ? result.issue : currentIssue
+        );
+
+        return {
+          ...current,
+          issues: nextIssues,
+          needsSupplement: nextIssues.some(
+            (currentIssue) => currentIssue.kind === "clarity_request"
+          )
+        };
+      });
+
+      setSupplements((current) => ({
+        ...current,
+        [issue.id]: {
+          name: file.name,
+          url: previewUrl,
+          status: result.status === "resolved" ? "resolved" : "reviewing",
+          message:
+            result.status === "resolved"
+              ? "已用局部圖完成精審並回寫原問題。"
+              : "資訊仍不足，建議再補一張更清楚的局部圖。"
+        }
+      }));
+    } catch (error) {
+      setSupplements((current) => ({
+        ...current,
+        [issue.id]: {
+          name: file.name,
+          url: previewUrl,
+          status: "error",
+          message:
+            error instanceof Error ? error.message : "局部精審流程發生錯誤。"
+        }
+      }));
+    }
   }
 
   return (
@@ -111,7 +186,7 @@ export default function Home() {
             建築設計 × 敷地繪圖，從「哪裡有問題」一路標到「可以怎麼改」。
           </p>
         </div>
-        <div className="status-pill">MVP v0.3 · API Review Flow</div>
+        <div className="status-pill">MVP v0.3 · Review + Crop API</div>
       </header>
 
       <section className="hero-grid">
@@ -364,9 +439,15 @@ export default function Home() {
                           <input
                             type="file"
                             accept="image/*"
-                            onChange={(event) => handleSupplementUpload(issue.id, event)}
+                            onChange={(event) => handleSupplementUpload(issue, event)}
                           />
-                          <strong>{supplement ? "更換局部圖" : "補上局部高解析圖"}</strong>
+                          <strong>
+                            {supplement?.status === "reviewing"
+                              ? "局部精審中…"
+                              : supplement
+                                ? "更換局部圖"
+                                : "補上局部高解析圖"}
+                          </strong>
                           <span>{supplement ? supplement.name : "重新近拍或上傳裁切圖"}</span>
                         </label>
 
@@ -374,17 +455,30 @@ export default function Home() {
                           <div className="supplement-preview">
                             <img src={supplement.url} alt="使用者補上的局部圖" />
                             <div>
-                              <strong>局部圖已補上</strong>
-                              <span>下一步會將這張圖連同原始 bbox 與全圖 context 送入局部精審。</span>
+                              <strong>
+                                {supplement.status === "reviewing"
+                                  ? "正在局部精審"
+                                  : supplement.status === "error"
+                                    ? "局部精審失敗"
+                                    : "局部精審完成"}
+                              </strong>
+                              <span>{supplement.message ?? "保留原圖 context，重審此區。"}</span>
                             </div>
                           </div>
                         )}
                       </div>
                     ) : (
-                      <div className="suggestion">
-                        <strong>修改方向</strong>
-                        <span>{issue.suggestion}</span>
-                      </div>
+                      <>
+                        <div className="suggestion">
+                          <strong>修改方向</strong>
+                          <span>{issue.suggestion}</span>
+                        </div>
+                        {supplement?.status === "resolved" && (
+                          <div className="resolved-note">
+                            ✓ 此意見已由局部補圖重新判讀
+                          </div>
+                        )}
+                      </>
                     )}
                   </article>
                 );
@@ -401,24 +495,24 @@ export default function Home() {
       <section className="roadmap">
         <div>
           <span className="step">ARCHITECTURE</span>
-          <h2>前端已改成真正走 Review API</h2>
+          <h2>完整圖與局部補圖都已走 Review API</h2>
         </div>
         <div className="roadmap-grid">
           <article>
             <strong>/api/review</strong>
-            <p>前端以 FormData 上傳完整圖，不再直接依賴頁面內的假資料。</p>
+            <p>完整圖進入全局審圖流程，產生問題、信心值與 clarity request。</p>
+          </article>
+          <article>
+            <strong>/api/review/supplement</strong>
+            <p>局部圖帶著原 issue context 回傳，避免失去整體配置關係。</p>
+          </article>
+          <article>
+            <strong>Patch Same Issue</strong>
+            <p>補圖結果回寫同一個 issue，保留完整的推理與修正歷程。</p>
           </article>
           <article>
             <strong>Provider Adapter</strong>
-            <p>目前使用 mock provider，之後可替換 GPT、Gemini 或其他視覺模型。</p>
-          </article>
-          <article>
-            <strong>Clarity Gate</strong>
-            <p>結構已支援清晰度、confidence 與 clarity_request。</p>
-          </article>
-          <article>
-            <strong>Crop Re-review</strong>
-            <p>下一個後端節點是把局部圖真正提交到同一 review issue 重審。</p>
+            <p>目前是 mock，下一步只需要接真正的 vision provider。</p>
           </article>
         </div>
       </section>
