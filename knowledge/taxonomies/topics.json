@@ -1,0 +1,86 @@
+{
+  "exam_types": [
+    "design",
+    "site_planning"
+  ],
+  "evaluation_layers": [
+    "gatekeeper",
+    "core_quality",
+    "polish"
+  ],
+  "topics": {
+    "site": [
+      "site_reading",
+      "adjacency",
+      "orientation",
+      "edge_condition",
+      "open_space_structure"
+    ],
+    "program": [
+      "program_completeness",
+      "functional_adjacency",
+      "public_private_gradient",
+      "service_space"
+    ],
+    "circulation": [
+      "main_entrance",
+      "pedestrian",
+      "vehicle",
+      "service",
+      "parking",
+      "dropoff",
+      "vertical_circulation",
+      "stair",
+      "egress",
+      "crossing_conflict"
+    ],
+    "outdoor": [
+      "plaza",
+      "courtyard",
+      "landscape",
+      "shade",
+      "green_buffer",
+      "outdoor_sequence"
+    ],
+    "accessibility": [
+      "accessible_route",
+      "accessible_entrance",
+      "ramp",
+      "accessible_toilet",
+      "level_change"
+    ],
+    "architecture": [
+      "massing",
+      "spatial_hierarchy",
+      "residual_space",
+      "room_proportion",
+      "structural_plausibility"
+    ],
+    "concept": [
+      "concept_clarity",
+      "concept_spatialization",
+      "identity",
+      "innovation"
+    ],
+    "sustainability": [
+      "daylight",
+      "ventilation",
+      "shade_strategy",
+      "green_system",
+      "water_strategy"
+    ],
+    "representation": [
+      "legibility",
+      "graphic_hierarchy",
+      "labeling",
+      "drawing_completeness",
+      "first_impression"
+    ],
+    "exam_strategy": [
+      "time_priority",
+      "minimal_fix",
+      "fatal_error",
+      "score_efficiency"
+    ]
+  }
+}
