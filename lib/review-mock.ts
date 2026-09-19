@@ -1,4 +1,8 @@
-import type { DrawingReview } from "@/lib/review-schema";
+import type {
+  DrawingReview,
+  ReviewItem,
+  SupplementReviewResult
+} from "@/lib/review-schema";
 
 export function createMockReview(fileName: string): DrawingReview {
   return {
@@ -107,5 +111,36 @@ export function createMockReview(fileName: string): DrawingReview {
         }
       }
     ]
+  };
+}
+
+export function createMockSupplementReview(
+  originalIssue: ReviewItem
+): SupplementReviewResult {
+  return {
+    status: "resolved",
+    issue: {
+      ...originalIssue,
+      kind: "issue",
+      title: "補圖後確認：樓梯與走道交界仍可再整理",
+      category: "動線 / 樓梯",
+      severity: "medium",
+      scoreImpact: -2,
+      confidence: 0.89,
+      visibilityStatus: "clear",
+      description:
+        "補上局部高解析圖後，可以確認樓梯方向與門線。主要問題不是法規尺寸，而是梯口、門扇與走道轉折集中在同一節點，閱讀與使用都偏擁擠。",
+      suggestion:
+        "優先把門扇開啟範圍移出梯口緩衝區，並讓走道方向更直接。若空間允許，可微調隔間牆線，減少梯口前的動線交叉。",
+      cropRequest: undefined,
+      redline: {
+        type: "polyline",
+        points: [
+          [originalIssue.bbox.x + 0.02, originalIssue.bbox.y + originalIssue.bbox.h * 0.75],
+          [originalIssue.bbox.x + originalIssue.bbox.w * 0.5, originalIssue.bbox.y + originalIssue.bbox.h * 0.45],
+          [originalIssue.bbox.x + originalIssue.bbox.w * 0.85, originalIssue.bbox.y + originalIssue.bbox.h * 0.2]
+        ]
+      }
+    }
   };
 }
