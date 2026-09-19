@@ -45,6 +45,16 @@ export default function Home() {
   const [supplements, setSupplements] = useState<Record<string, SupplementState>>({});
 
   const issues = review?.issues ?? [];
+  const displayDimensions =
+    review?.dimensions ??
+    defaultDimensions.map((label) => ({
+      key: label,
+      label,
+      score: null,
+      maxScore: null,
+      confidence: 0
+    }));
+
   const activeIssue = useMemo<ReviewItem | undefined>(
     () => issues.find((issue) => issue.id === activeId),
     [activeId, issues]
@@ -225,8 +235,9 @@ export default function Home() {
           </div>
 
           <div className="dimension-list">
-            {(review?.dimensions ?? defaultDimensions.map((label) => ({ label }))).map((dimension) => {
-              const hasScore = "score" in dimension;
+            {displayDimensions.map((dimension) => {
+              const hasScore =
+                dimension.score !== null && dimension.maxScore !== null;
 
               return (
                 <div key={dimension.label} className="dimension-row">
@@ -240,7 +251,11 @@ export default function Home() {
                       }}
                     />
                   </div>
-                  <b>{hasScore ? `${dimension.score}/${dimension.maxScore}` : "--"}</b>
+                  <b>
+                    {hasScore
+                      ? `${dimension.score}/${dimension.maxScore}`
+                      : "--"}
+                  </b>
                 </div>
               );
             })}
