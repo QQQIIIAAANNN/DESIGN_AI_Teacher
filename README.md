@@ -4,118 +4,86 @@
 
 ## 產品核心
 
-這個專案不是單純讓 AI 對圖面產生文字講評，而是把審圖結果轉成可操作的「圖面層」：
+不是單純讓 AI 對圖面產生文字講評，而是把審圖結果轉成可操作的圖面層：
 
-1. 上傳考生作答圖
-2. AI 依結構化 rubric 審圖
-3. 回傳問題座標與嚴重度
-4. 用 SVG overlay 在原圖上框選錯誤區域
-5. 以 SVG redline 顯示修改方向
-6. 文字說明原因、扣分風險與改法
-7. 後續累積個人歷次弱點與進步軌跡
+1. 上傳完整作答圖。
+2. AI 依結構化 rubric 審圖。
+3. 回傳問題座標、嚴重度與 confidence。
+4. 用 SVG overlay 框選錯誤區域。
+5. 以結構化 SVG redline 顯示修改方向。
+6. 若局部圖面不足以可靠判讀，主動要求補上高解析局部圖。
+7. 補圖後針對同一區域重新精審，而不是硬猜。
+8. 後續累積個人歷次弱點與進步軌跡。
 
-## 目前 MVP
+## 目前 MVP v0.2
 
 - Next.js + TypeScript
 - JPG / PNG 圖面上傳
 - SVG 問題框選
 - SVG redline 示意
+- normalized coordinates
 - 結構化評分面板
 - 問題清單與修改建議
+- Clarity Gate / 需補圖狀態
+- 局部圖片補傳 UI
 - Responsive UI
+- GitHub Actions build CI
 
-目前的審圖資料使用 mock response，目的是先驗證「AI 審圖 + SVG 定位 + 紅線修改」的核心互動。
+目前審圖內容使用 mock response，先驗證「AI 審圖 + SVG grounding + 補圖精審」的互動模型。
 
-## 下一階段架構
-
-建議 AI pipeline：
+## AI Pipeline
 
 ```
 Upload
   ↓
 Image normalization
   ↓
-Vision model
-  ├─ site / drawing segmentation
-  ├─ spatial reasoning
-  └─ candidate issues
+Global vision pass
   ↓
-Rubric engine
-  ├─ 配置
-  ├─ 動線
-  ├─ 戶外空間
-  ├─ 無障礙 / 法規
-  ├─ 永續
-  └─ 設計概念 / 圖面表達
+Clarity gate
+  ├─ clear → rubric review
+  └─ unclear → clarity_request → supplemental crop → local re-review
   ↓
 RAG
-  ├─ 導師講義
-  ├─ 歷屆高分圖
-  ├─ 批改案例
-  └─ 法規資料
+  ├─ teacher rubrics
+  ├─ reference cases
+  ├─ codes
+  └─ visual references
   ↓
 Structured review JSON
   ↓
 SVG renderer
-  ├─ bbox
-  ├─ route
-  ├─ wall
-  ├─ landscape
-  └─ annotations
 ```
 
-### 建議 AI 回傳格式
+## 文件
 
-```json
-{
-  "score": 68,
-  "dimensions": {
-    "planning": 14,
-    "circulation": 12,
-    "outdoor": 13,
-    "code": 15,
-    "concept": 14
-  },
-  "issues": [
-    {
-      "id": 1,
-      "category": "circulation",
-      "severity": "high",
-      "score_impact": -4,
-      "bbox": { "x": 0.08, "y": 0.12, "w": 0.28, "h": 0.26 },
-      "summary": "入口與主要廣場關係偏弱",
-      "reason": "...",
-      "suggestion": "...",
-      "redline": {
-        "type": "polyline",
-        "points": [[0.1, 0.42], [0.42, 0.24]]
-      }
-    }
-  ]
-}
-```
+- `docs/PRD-v0.2.md`：MVP 產品規格與驗證方法
+- `docs/review-schema.md`：Review JSON 與補圖資料結構
+- `lib/review-schema.ts`：前端共用 TypeScript types
 
-座標建議全部使用 normalized 0~1，避免不同解析度導致 SVG 位移。
+## RAG 建議
 
-## RAG 資料建議
-
-不要一開始把所有 PDF 與圖面混成同一個向量庫。
-
-至少拆成：
+資料至少拆成：
 
 - `rubrics`：老師講義與評圖原則
 - `cases`：高分 / 低分案例及評論
 - `codes`：法規與無障礙規範
 - `visual_refs`：圖面案例與視覺 embedding
 
-圖面案例最好同時保存：
-- 原圖
-- 題目類型
-- 年份
-- 分數
-- 老師評論
-- 關鍵問題
-- 可接受解法
+不要一開始把所有 PDF、圖面、法規塞進同一個 collection。那不是知識庫，是 AI 廚餘桶。
+
+## MVP 驗證
+
+建議先準備 30～50 張已有真人老師批改結果的練習圖，評估：
+
+- 問題召回率
+- 問題精確率
+- SVG 定位準確度
+- 紅線修改有用程度
+- 補圖要求是否合理
+- 看不清楚卻硬判的比例
+
+最後一項應作為關鍵品質指標。
 
 ## 商業化預留
 
@@ -123,12 +91,15 @@ SVG renderer
 
 - account
 - practice_session
+- drawing
 - review
+- review_issue
+- supplemental_crop
 - usage_credit
 - payment_transaction
 - knowledge_source
 
-建議先用「每張圖計次」而不是月訂閱測市場，因為考生的使用頻率通常集中在考前。
+第一階段比起月訂閱，更適合測試「整張審圖 / 局部精審 / 紅線改圖」點數制。
 
 ## 開發
 
