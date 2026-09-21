@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DrawingReview,
   ReviewItem,
@@ -37,6 +37,12 @@ type SupplementState = {
   message?: string;
 };
 
+type SuggestionGraphicState = {
+  status: "generating" | "ready" | "error";
+  url?: string;
+  message?: string;
+};
+
 function svgValue(value: number) {
   return value * 100;
 }
@@ -50,6 +56,12 @@ export default function Home() {
   const [reviewError, setReviewError] = useState("");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [supplements, setSupplements] = useState<Record<string, SupplementState>>({});
+  const [suggestionGraphics, setSuggestionGraphics] = useState<Record<string, SuggestionGraphicState>>({});
+  const suggestionGraphicUrls = useRef<string[]>([]);
+
+  useEffect(() => {
+    return () => suggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
 
   const issues = review?.issues ?? [];
   const displayDimensions =
@@ -67,6 +79,208 @@ export default function Home() {
     [activeId, issues]
   );
 
+  function clearSuggestionGraphics() {
+    suggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    suggestionGraphicUrls.current = [];
+    setSuggestionGraphics({});
+  }
+
+  async function handleGenerateSuggestion(issue: ReviewItem) {
+    if (!imageUrl || issue.kind !== "issue") return;
+
+    const previousUrl = suggestionGraphics[issue.id]?.url;
+    if (previousUrl) {
+      URL.revokeObjectURL(previousUrl);
+      suggestionGraphicUrls.current = suggestionGraphicUrls.current.filter(
+        (url) => url !== previousUrl
+      );
+    }
+    setSuggestionGraphics((current) => ({
+      ...current,
+      [issue.id]: { status: "generating" }
+    }));
+
+    try {
+      const source = new Image();
+      source.src = imageUrl;
+      await source.decode();
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 1600;
+      canvas.height = 1300;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("此瀏覽器無法建立圖像畫布。");
+
+      context.fillStyle = "#f7f4ee";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#201e1b";
+      context.font = "700 44px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
+      context.fillText("單項改善建議圖", 64, 76);
+      context.fillStyle = "#716b63";
+      context.font = "24px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
+      context.fillText("保留原圖脈絡，聚焦目前選取的 SVG 定位區域", 64, 122);
+
+      const frame = { x: 64, y: 164, w: 1472, h: 676 };
+      context.fillStyle = "#ffffff";
+      context.fillRect(frame.x, frame.y, frame.w, frame.h);
+      context.strokeStyle = "#ded8cf";
+      context.lineWidth = 2;
+      context.strokeRect(frame.x, frame.y, frame.w, frame.h);
+
+      const clamp = (value: number) => Math.max(0, Math.min(1, value));
+      const boxX = clamp(issue.bbox.x);
+      const boxY = clamp(issue.bbox.y);
+      const boxW = Math.max(0.005, Math.min(1 - boxX, issue.bbox.w));
+      const boxH = Math.max(0.005, Math.min(1 - boxY, issue.bbox.h));
+      const padX = Math.max(boxW * 0.35, 0.03);
+      const padY = Math.max(boxH * 0.35, 0.03);
+      const cropLeft = clamp(boxX - padX);
+      const cropTop = clamp(boxY - padY);
+      const cropRight = clamp(boxX + boxW + padX);
+      const cropBottom = clamp(boxY + boxH + padY);
+      const cropWidth = Math.max(0.01, cropRight - cropLeft);
+      const cropHeight = Math.max(0.01, cropBottom - cropTop);
+
+      const sourceX = cropLeft * source.naturalWidth;
+      const sourceY = cropTop * source.naturalHeight;
+      const sourceW = cropWidth * source.naturalWidth;
+      const sourceH = cropHeight * source.naturalHeight;
+      const scale = Math.min(frame.w / sourceW, frame.h / sourceH);
+      const renderedW = sourceW * scale;
+      const renderedH = sourceH * scale;
+      const renderedX = frame.x + (frame.w - renderedW) / 2;
+      const renderedY = frame.y + (frame.h - renderedH) / 2;
+
+      context.drawImage(
+        source,
+        sourceX,
+        sourceY,
+        sourceW,
+        sourceH,
+        renderedX,
+        renderedY,
+        renderedW,
+        renderedH
+      );
+
+      const mapX = (value: number) =>
+        renderedX + ((clamp(value) - cropLeft) / cropWidth) * renderedW;
+      const mapY = (value: number) =>
+        renderedY + ((clamp(value) - cropTop) / cropHeight) * renderedH;
+
+      context.save();
+      context.beginPath();
+      context.rect(renderedX, renderedY, renderedW, renderedH);
+      context.clip();
+      context.strokeStyle = "#a63830";
+      context.lineWidth = 7;
+      context.setLineDash([18, 12]);
+      context.strokeRect(
+        mapX(boxX),
+        mapY(boxY),
+        (boxW / cropWidth) * renderedW,
+        (boxH / cropHeight) * renderedH
+      );
+      context.setLineDash([]);
+
+      if (issue.redline) {
+        context.strokeStyle = "#d28b17";
+        context.fillStyle = "#d28b17";
+        context.lineWidth = 7;
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        if (issue.redline.type === "line") {
+          context.beginPath();
+          context.moveTo(mapX(issue.redline.x1), mapY(issue.redline.y1));
+          context.lineTo(mapX(issue.redline.x2), mapY(issue.redline.y2));
+          context.stroke();
+        } else if (issue.redline.type === "rect") {
+          context.setLineDash([16, 10]);
+          context.strokeRect(
+            mapX(issue.redline.x),
+            mapY(issue.redline.y),
+            (issue.redline.w / cropWidth) * renderedW,
+            (issue.redline.h / cropHeight) * renderedH
+          );
+          context.setLineDash([]);
+        } else {
+          context.beginPath();
+          issue.redline.points.forEach(([x, y], index) => {
+            if (index === 0) context.moveTo(mapX(x), mapY(y));
+            else context.lineTo(mapX(x), mapY(y));
+          });
+          context.stroke();
+        }
+      }
+      context.restore();
+
+      context.fillStyle = "#a63830";
+      context.font = "700 26px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
+      context.fillText("紅框：問題定位　橘線：修改提示", 64, 888);
+      context.fillStyle = "#201e1b";
+      context.font = "700 34px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
+      context.fillText(issue.title, 64, 952, 1472);
+      context.fillStyle = "#746f68";
+      context.font = "600 23px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
+      context.fillText(issue.category + " · " + severityLabels[issue.severity] + "風險", 64, 991);
+
+      context.fillStyle = "#201e1b";
+      context.font = "700 25px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
+      context.fillText("修改方向", 64, 1038);
+      context.fillStyle = "#504b45";
+      context.font = "24px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
+      const lines: string[] = [];
+      let currentLine = "";
+      for (const character of issue.suggestion) {
+        const nextLine = currentLine + character;
+        if (currentLine && context.measureText(nextLine).width > 1472) {
+          lines.push(currentLine);
+          currentLine = character;
+        } else {
+          currentLine = nextLine;
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+      lines.slice(0, 3).forEach((line, index) => {
+        context.fillText(line, 64, 1080 + index * 34);
+      });
+
+      context.fillStyle = "#817b74";
+      context.font = "18px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif";
+      context.fillText(
+        "本圖由原圖局部、SVG 定位與審圖文字在本機組成；不會自動改畫平面，也不是 AI 生成圖。",
+        64,
+        1225,
+        1472
+      );
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((result) => {
+          if (result) resolve(result);
+          else reject(new Error("圖像匯出失敗，請稍後重試。"));
+        }, "image/png");
+      });
+      const url = URL.createObjectURL(blob);
+      suggestionGraphicUrls.current.push(url);
+      setSuggestionGraphics((current) => ({
+        ...current,
+        [issue.id]: {
+          status: "ready",
+          url,
+          message: "已在此瀏覽器完成單項圖卡，沒有額外上傳原圖。"
+        }
+      }));
+    } catch (error) {
+      setSuggestionGraphics((current) => ({
+        ...current,
+        [issue.id]: {
+          status: "error",
+          message: error instanceof Error ? error.message : "建議圖產生失敗。"
+        }
+      }));
+    }
+  }
+
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -78,6 +292,7 @@ export default function Home() {
     setActiveId("");
     setReviewError("");
     setSupplements({});
+    clearSuggestionGraphics();
   }
 
   async function handleReview() {
@@ -85,6 +300,7 @@ export default function Home() {
 
     setIsReviewing(true);
     setReviewError("");
+    clearSuggestionGraphics();
 
     try {
       let nextReview: DrawingReview;
@@ -437,6 +653,7 @@ export default function Home() {
             {review ? (
               issues.map((issue, index) => {
                 const supplement = supplements[issue.id];
+                const graphic = suggestionGraphics[issue.id];
 
                 return (
                   <article
@@ -524,6 +741,48 @@ export default function Home() {
                           </div>
                         )}
                       </>
+                    )}
+                    {issue.kind === "issue" && (
+                      <div
+                        className="suggestion-graphic-actions"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <button
+                          className="suggestion-generate-button"
+                          type="button"
+                          disabled={graphic?.status === "generating"}
+                          onClick={() => void handleGenerateSuggestion(issue)}
+                        >
+                          {graphic?.status === "generating"
+                            ? "正在產生此項建議圖…"
+                            : graphic?.status === "ready"
+                              ? "重新產生此項建議圖"
+                              : "產生此項建議圖"}
+                        </button>
+                        <p className="suggestion-graphic-note">
+                          依此項 SVG 定位、紅線與修改方向，個別整理成可下載圖卡；目前為本機圖面說明，不會自動改畫平面。
+                        </p>
+                        {graphic?.status === "error" && (
+                          <p className="suggestion-graphic-error" role="alert">
+                            {graphic.message}
+                          </p>
+                        )}
+                        {graphic?.status === "ready" && graphic.url && (
+                          <figure className="suggestion-graphic-preview">
+                            <img src={graphic.url} alt={issue.title + " 的單項建議圖"} />
+                            <figcaption>
+                              <span>{graphic.message}</span>
+                              <a
+                                href={graphic.url}
+                                download={"建議圖-" + issue.id + ".png"}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                下載 PNG
+                              </a>
+                            </figcaption>
+                          </figure>
+                        )}
+                      </div>
                     )}
                   </article>
                 );
