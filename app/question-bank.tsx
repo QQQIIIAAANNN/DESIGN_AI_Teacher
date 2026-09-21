@@ -99,7 +99,7 @@ export default function QuestionBank() {
           fileName: row.original_filename,
           size: Number(row.size_bytes),
           url,
-          status: row.status === "draft" ? "draft" : "published"
+          status: row.status === "draft" ? ("draft" as const) : ("published" as const)
         };
       }));
       setRemoteQuestions(records);
