@@ -27,4 +27,4 @@ PDF 檔案本體放在檔案儲存服務，資料庫只保存檔案索引與中�
 
 ## 目前測試版的界線
 
-GitHub Pages 是靜態網站。此原型只用瀏覽器的本機暫存與 PDF 預覽，不呼叫伺服器、不儲存題目；重新整理後清空。正式上傳及跨裝置資料庫需要另接後端與檔案儲存。題目檔發布前應確認可公開使用的授權。
+GitHub Pages 本身仍是公開靜態網站；沒有 Supabase 設定時，題目只在目前瀏覽器暫存，重新整理後清空。設定 NEXT_PUBLIC_SUPABASE_URL 與 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY 後，題庫可使用邀請制登入、Postgres 索引與私有 Storage；實際上線前須套用 Supabase migration 並完成 RLS / Auth 設定。詳細步驟見 docs/backend-setup.md。題目檔發布前仍需確認可整理與分享的授權。

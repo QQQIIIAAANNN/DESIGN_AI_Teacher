@@ -35,6 +35,11 @@ jobs:
         run: npm ci
 
       - name: Build static demo
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_REVIEW_MODEL: ${{ vars.NEXT_PUBLIC_REVIEW_MODEL }}
+          NEXT_PUBLIC_IMAGE_MODEL: ${{ vars.NEXT_PUBLIC_IMAGE_MODEL }}
         run: npx next build pages-site
 
       - name: Upload Pages artifact

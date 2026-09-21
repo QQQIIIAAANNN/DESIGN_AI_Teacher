@@ -12,6 +12,16 @@ import {
   createMockSupplementReview
 } from "@/lib/review-mock";
 import QuestionBank from "./question-bank";
+import {
+  isImageSuggestionConfigured,
+  isLiveReviewConfigured,
+  isSupabaseConfigured
+} from "@/lib/supabase-browser";
+import {
+  generateIssueSuggestionImage,
+  reviewDrawingWithAi,
+  reviewSupplementWithAi
+} from "@/lib/ai-proxy-client";
 
 const defaultDimensions = [
   "配置與機能",
@@ -29,6 +39,9 @@ const severityLabels: Record<ReviewSeverity, string> = {
 };
 
 const isStaticDemo = process.env.NEXT_PUBLIC_STATIC_DEMO === "true";
+const liveReviewEnabled = isLiveReviewConfigured();
+const aiSuggestionEnabled = isImageSuggestionConfigured();
+const supabaseConnected = isSupabaseConfigured();
 
 type SupplementState = {
   name: string;
@@ -57,10 +70,16 @@ export default function Home() {
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [supplements, setSupplements] = useState<Record<string, SupplementState>>({});
   const [suggestionGraphics, setSuggestionGraphics] = useState<Record<string, SuggestionGraphicState>>({});
+  const [aiSuggestionGraphics, setAiSuggestionGraphics] = useState<Record<string, SuggestionGraphicState>>({});
+  const [aiConsent, setAiConsent] = useState(false);
   const suggestionGraphicUrls = useRef<string[]>([]);
+  const aiSuggestionGraphicUrls = useRef<string[]>([]);
 
   useEffect(() => {
-    return () => suggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    return () => {
+      suggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
+      aiSuggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    };
   }, []);
 
   const issues = review?.issues ?? [];
@@ -82,7 +101,10 @@ export default function Home() {
   function clearSuggestionGraphics() {
     suggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
     suggestionGraphicUrls.current = [];
+    aiSuggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    aiSuggestionGraphicUrls.current = [];
     setSuggestionGraphics({});
+    setAiSuggestionGraphics({});
   }
 
   async function handleGenerateSuggestion(issue: ReviewItem) {
@@ -281,6 +303,46 @@ export default function Home() {
     }
   }
 
+  async function handleGenerateAiSuggestion(issue: ReviewItem) {
+    if (!imageUrl || issue.kind !== "issue") return;
+    if (!aiConsent) {
+      setReviewError("請先勾選 AI 資料傳送說明，再產生建議圖。");
+      return;
+    }
+
+    const previous = aiSuggestionGraphics[issue.id]?.url;
+    if (previous?.startsWith("blob:")) {
+      URL.revokeObjectURL(previous);
+      aiSuggestionGraphicUrls.current = aiSuggestionGraphicUrls.current.filter((url) => url !== previous);
+    }
+    setAiSuggestionGraphics((current) => ({
+      ...current,
+      [issue.id]: { status: "generating" }
+    }));
+
+    try {
+      const result = await generateIssueSuggestionImage(imageUrl, issue);
+      const url = result.blob ? URL.createObjectURL(result.blob) : result.remoteUrl;
+      if (result.blob) aiSuggestionGraphicUrls.current.push(url);
+      setAiSuggestionGraphics((current) => ({
+        ...current,
+        [issue.id]: {
+          status: "ready",
+          url,
+          message: "由 AI 參考此問題區域與修改方向生成；請再自行核對比例、法規與設計完整性。"
+        }
+      }));
+    } catch (error) {
+      setAiSuggestionGraphics((current) => ({
+        ...current,
+        [issue.id]: {
+          status: "error",
+          message: error instanceof Error ? error.message : "AI 建議圖產生失敗。"
+        }
+      }));
+    }
+  }
+
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -292,6 +354,7 @@ export default function Home() {
     setActiveId("");
     setReviewError("");
     setSupplements({});
+    setAiConsent(false);
     clearSuggestionGraphics();
   }
 
@@ -305,7 +368,10 @@ export default function Home() {
     try {
       let nextReview: DrawingReview;
 
-      if (isStaticDemo) {
+      if (liveReviewEnabled) {
+        if (!aiConsent) throw new Error("請先勾選 AI 資料傳送說明，再開始正式審圖。");
+        nextReview = await reviewDrawingWithAi(drawingFile);
+      } else if (isStaticDemo) {
         nextReview = createMockReview(drawingFile.name);
       } else {
         const formData = new FormData();
@@ -357,7 +423,10 @@ export default function Home() {
     try {
       let result: SupplementReviewResult;
 
-      if (isStaticDemo) {
+      if (liveReviewEnabled) {
+        if (!aiConsent) throw new Error("請先勾選 AI 資料傳送說明，再進行局部精審。");
+        result = await reviewSupplementWithAi(file, issue);
+      } else if (isStaticDemo) {
         result = createMockSupplementReview(issue);
       } else {
         const formData = new FormData();
@@ -433,13 +502,18 @@ export default function Home() {
           </p>
         </div>
         <div className={`status-pill ${isStaticDemo ? "demo-status" : ""}`}>
-          {isStaticDemo ? "GitHub Pages 測試版 · Mock 評圖" : "MVP v0.3 · Review + Crop API"}
+          {isStaticDemo ? (liveReviewEnabled ? "GitHub Pages · 私有 AI 審圖" : "GitHub Pages 測試版 · Mock 評圖") : "MVP v0.3 · Review + Crop API"}
         </div>
       </header>
 
       {isStaticDemo && (
         <p className="demo-notice" role="status">
-          這是靜態測試版：回饋為固定示範內容，不代表實際 AI 判讀。上傳圖面及題目 PDF 只在此瀏覽器預覽，不會傳到伺服器或保存。
+          {liveReviewEnabled
+            ? "正式 AI 功能已設定：只有在此勾選同意並按下審圖後，原圖或局部補圖才會送至 Supabase Edge Function、私有 CLIProxyAPI 與其設定的上游模型；平台不會將原圖公開。"
+            : "目前為 Mock 評圖，固定示範回饋不代表 AI 判讀。練習圖只在本機預覽。"}
+          {supabaseConnected
+            ? " 歷年題目 PDF 使用登入後的 Supabase 私有題庫。"
+            : " 題目 PDF 只在目前瀏覽器暫存；重新整理後清空。"}
         </p>
       )}
 
@@ -459,12 +533,29 @@ export default function Home() {
             <span>{drawingFile ? drawingFile.name : "建議使用完整掃描或正拍"}</span>
           </label>
 
+          {(liveReviewEnabled || aiSuggestionEnabled) && (
+            <label className="ai-consent">
+              <input
+                type="checkbox"
+                checked={aiConsent}
+                onChange={(event) => setAiConsent(event.target.checked)}
+              />
+              <span>
+                我已瞭解：按下正式審圖會傳送完整圖面；產生單項 AI 建議圖會傳送該問題附近的裁圖與建議文字，資料經 Supabase / 私有 CLIProxyAPI 送至所設定的上游模型處理。
+              </span>
+            </label>
+          )}
+
           <button
             className="primary-btn"
-            disabled={!drawingFile || isReviewing}
+            disabled={!drawingFile || isReviewing || (liveReviewEnabled && !aiConsent)}
             onClick={handleReview}
           >
-            {isReviewing ? "AI 審圖中…" : "開始 AI 審圖"}
+            {isReviewing
+              ? "AI 審圖中…"
+              : liveReviewEnabled
+                ? "開始正式 AI 審圖"
+                : "開始示範審圖"}
           </button>
 
           {reviewError && <p className="error-text">{reviewError}</p>}
@@ -654,6 +745,7 @@ export default function Home() {
               issues.map((issue, index) => {
                 const supplement = supplements[issue.id];
                 const graphic = suggestionGraphics[issue.id];
+                const aiGraphic = aiSuggestionGraphics[issue.id];
 
                 return (
                   <article
@@ -754,11 +846,25 @@ export default function Home() {
                           onClick={() => void handleGenerateSuggestion(issue)}
                         >
                           {graphic?.status === "generating"
-                            ? "正在產生此項建議圖…"
+                            ? "正在製作本機圖卡…"
                             : graphic?.status === "ready"
-                              ? "重新產生此項建議圖"
-                              : "產生此項建議圖"}
+                              ? "重新製作本機圖卡"
+                              : "製作本機文字紅線圖卡"}
                         </button>
+                        {aiSuggestionEnabled && (
+                          <button
+                            className="suggestion-generate-button ai-suggestion-button"
+                            type="button"
+                            disabled={aiGraphic?.status === "generating" || !aiConsent}
+                            onClick={() => void handleGenerateAiSuggestion(issue)}
+                          >
+                            {aiGraphic?.status === "generating"
+                              ? "AI 正在產生局部示意圖…"
+                              : aiGraphic?.status === "ready"
+                                ? "重新產生 AI 局部示意圖"
+                                : "AI 產生此項局部示意圖"}
+                          </button>
+                        )}
                         <p className="suggestion-graphic-note">
                           依此項 SVG 定位、紅線與修改方向，個別整理成可下載圖卡；目前為本機圖面說明，不會自動改畫平面。
                         </p>
@@ -769,16 +875,45 @@ export default function Home() {
                         )}
                         {graphic?.status === "ready" && graphic.url && (
                           <figure className="suggestion-graphic-preview">
-                            <img src={graphic.url} alt={issue.title + " 的單項建議圖"} />
+                            <img src={graphic.url} alt={issue.title + " 的本機文字紅線圖卡"} />
                             <figcaption>
                               <span>{graphic.message}</span>
                               <a
                                 href={graphic.url}
-                                download={"建議圖-" + issue.id + ".png"}
+                                download={"本機圖卡-" + issue.id + ".png"}
                                 onClick={(event) => event.stopPropagation()}
                               >
                                 下載 PNG
                               </a>
+                            </figcaption>
+                          </figure>
+                        )}
+                        {aiGraphic?.status === "error" && (
+                          <p className="suggestion-graphic-error" role="alert">{aiGraphic.message}</p>
+                        )}
+                        {aiGraphic?.status === "ready" && aiGraphic.url && (
+                          <figure className="suggestion-graphic-preview ai-suggestion-preview">
+                            <img src={aiGraphic.url} alt={issue.title + " 的 AI 局部改善示意圖"} />
+                            <figcaption>
+                              <span>{aiGraphic.message}</span>
+                              {aiGraphic.url.startsWith("blob:") ? (
+                                <a
+                                  href={aiGraphic.url}
+                                  download={"AI改善示意圖-" + issue.id + ".png"}
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  下載 PNG
+                                </a>
+                              ) : (
+                                <a
+                                  href={aiGraphic.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  開啟原圖
+                                </a>
+                              )}
                             </figcaption>
                           </figure>
                         )}
@@ -799,7 +934,7 @@ export default function Home() {
       <section className="roadmap">
         <div>
           <span className="step">ARCHITECTURE</span>
-          <h2>{isStaticDemo ? "GitHub Pages 互動測試" : "完整圖與局部補圖都已走 Review API"}</h2>
+          <h2>{isStaticDemo ? (liveReviewEnabled ? "Supabase + CLIProxyAPI 測試版" : "GitHub Pages 互動測試") : "完整圖與局部補圖都已走 Review API"}</h2>
         </div>
         <div className="roadmap-grid">
           {isStaticDemo ? (

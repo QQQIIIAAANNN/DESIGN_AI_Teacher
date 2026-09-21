@@ -109,3 +109,8 @@ npm run dev
 ```
 
 打開 http://localhost:3000
+
+
+## Backend setup
+
+Supabase schema, private question-bank storage, invite-only sign-in, and the protected CLIProxyAPI Edge Function are documented in [docs/backend-setup.md](docs/backend-setup.md). The app remains in local Mock mode until a Supabase project and server-side secrets are configured.
