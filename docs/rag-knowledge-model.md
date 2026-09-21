@@ -1,4 +1,4 @@
-# Multimodal RAG Knowledge Model v0.1
+# Multimodal RAG Knowledge Model v0.2
 
 ## 1. 目標
 
@@ -46,13 +46,20 @@
   "source_title": "example.pdf",
   "page": 12,
   "exam_type": "design",
-  "topic": ["circulation", "entrance"],
+  "topics": ["main_entrance", "pedestrian", "first_impression"],
+  "unit_role": "evaluation_rule",
+  "evaluation_layer": "gatekeeper",
   "knowledge_type": "soft_rule",
   "statement": "主要入口應能由基地主要接近方向快速辨識。",
   "conditions": [
     "適用於具明確公共入口的題型"
   ],
   "exceptions": [],
+  "evidence_targets": [
+    "主要接近方向",
+    "入口位置",
+    "前廣場或步行導引"
+  ],
   "severity_hint": "high",
   "reasoning": "入口不清會同時削弱配置、動線與第一印象。",
   "bad_pattern": "入口藏在量體轉角且缺少廣場或軸線導引。",
@@ -67,7 +74,26 @@
 }
 ```
 
-## 4. knowledge_type
+## 4. unit_role 與 evaluation_layer
+
+knowledge_type 表示「這筆知識的權威與性質」，unit_role 則表示「Agent 要拿它做什麼」。
+
+unit_role：
+
+- evaluation_rule：拿來判斷圖面。
+- review_policy：規範 AI 自己如何審圖，例如 clarity gate、evidence、confidence。
+- repair_strategy：描述修改策略。
+- precedent：案例或可比較做法。
+
+evaluation_rule 再分：
+
+- gatekeeper：先檢查，可能直接影響通關。
+- core_quality：基本盤成立後的核心設計品質。
+- polish：表現、創意與細節加分。
+
+其他 unit_role 的 evaluation_layer 使用 null。
+
+## 5. knowledge_type
 
 必須明確區分：
 
@@ -81,7 +107,7 @@
 
 這是避免 AI 把「老師喜歡」講成「法律規定」的核心欄位。
 
-## 5. 圖像資料模型
+## 6. 圖像資料模型
 
 不要只保存完整頁面。
 
@@ -123,7 +149,7 @@
 }
 ```
 
-## 6. PDF Ingestion Pipeline
+## 7. PDF Ingestion Pipeline
 
 ### Step 1 — Inventory
 
@@ -204,7 +230,7 @@ AI 可以先抽取，但重要 knowledge unit 需要人工確認：
 
 確認後才寫入 retrieval index。
 
-## 7. Retrieval Architecture
+## 8. Retrieval Architecture
 
 建議不要只有一個 vector search。
 
@@ -252,19 +278,19 @@ CLIP / multimodal embedding。
 - repair patterns
 - source provenance
 
-## 8. Agent Query Example
+## 9. Agent Query Example
 
 當 AI 發現「入口不清楚」：
 
-1. query topic = entrance + circulation
+1. query topics = main_entrance + pedestrian + first_impression
 2. filter exam_type = design
-3. retrieve soft_rule / anti_pattern
+3. retrieve gatekeeper evaluation_rule + soft_rule / anti_pattern
 4. retrieve 2～3 個相似圖像案例
 5. 根據當前 bbox 比較
 6. 產生批改
 7. source_refs 回傳原始來源
 
-## 9. Chunking 原則
+## 10. Chunking 原則
 
 不要：
 
@@ -280,7 +306,7 @@ CLIP / multimodal embedding。
 - source provenance
 - page + bbox 可追溯
 
-## 10. 建議索引
+## 11. 建議索引
 
 第一階段：
 
@@ -291,7 +317,7 @@ CLIP / multimodal embedding。
 
 可以先用單一 DB 實作，不必一開始分散式。
 
-## 11. 資料品質等級
+## 12. 資料品質等級
 
 每條 knowledge unit 標記：
 
@@ -306,7 +332,7 @@ Agent 的基礎通關準則只允許使用 canonical / reviewed。
 
 raw 資料不得直接變成高信心批改依據。
 
-## 12. 來源可追溯
+## 13. 來源可追溯
 
 每一條最終審圖意見若有使用 RAG，必須保留：
 
@@ -318,3 +344,18 @@ raw 資料不得直接變成高信心批改依據。
 - source type
 
 未來 UI 可以顯示「此建議參考了哪些老師講義 / 案例」，提升可信度。
+
+
+## 14. Canonical baseline 與外部 RAG 分層
+
+平台自有的審圖底線存於 `knowledge/manifests/knowledge_units.jsonl`，來源為 `docs/agent-teacher-principles.md`。
+
+這些 canonical review policies 與 gatekeepers 應先於外部教材 RAG 生效。老師講義、歷屆案例與法規可以補充、舉證與提供 precedent，但不能覆蓋以下底線：
+
+- 證據不足時不亂猜。
+- hard rule、soft rule、precedent、preference 必須分離。
+- 先處理 gatekeeper，再處理核心品質與 polish。
+- 高分案例不是唯一答案。
+- 考試修改預設先找 Minimal Fix。
+
+新增 manifest 後先執行 `npm run validate:knowledge`，確認 source、topic、layer 與 ID 關係完整，再建立 embedding/index。

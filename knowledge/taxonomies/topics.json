@@ -1,7 +1,8 @@
 {
   "exam_types": [
     "design",
-    "site_planning"
+    "site_planning",
+    "both"
   ],
   "evaluation_layers": [
     "gatekeeper",
@@ -81,6 +82,15 @@
       "minimal_fix",
       "fatal_error",
       "score_efficiency"
+    ],
+    "review_process": [
+      "clarity_gate",
+      "evidence_grounding",
+      "source_provenance",
+      "confidence_calibration",
+      "local_re_review",
+      "authority_separation",
+      "precedent_usage"
     ]
   }
 }
