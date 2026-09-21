@@ -14,3 +14,402 @@
   background: #fff8df;
   color: #665322;
 }
+
+.question-bank {
+  margin: 18px 0;
+  padding: 24px;
+  border: 1px solid #ded8cf;
+  border-radius: 24px;
+  background: #fffdf9;
+  box-shadow: 0 20px 60px #3d342514;
+}
+
+.qb-heading,
+.qb-library-heading,
+.qb-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.qb-heading h2 {
+  margin: 6px 0 7px;
+  font-size: 22px;
+  letter-spacing: -.02em;
+}
+
+.qb-heading p,
+.qb-card-heading p,
+.qb-library-heading p {
+  margin: 0;
+  color: #746f68;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.qb-local-chip {
+  flex: 0 0 auto;
+  border: 1px solid #e4d39f;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #fff8df;
+  color: #665322;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.qb-layout {
+  display: grid;
+  grid-template-columns: minmax(290px, .9fr) minmax(0, 1.1fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.qb-upload-card,
+.qb-library-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #e5dfd6;
+  border-radius: 17px;
+  background: #faf7f2;
+}
+
+.qb-card-heading {
+  justify-content: flex-start;
+  margin-bottom: 16px;
+}
+
+.qb-step-number {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 11px;
+  background: #191817;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.qb-card-heading h3,
+.qb-library-heading h3 {
+  margin: 0 0 3px;
+  font-size: 15px;
+}
+
+.qb-form-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.qb-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #625e58;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.qb-title-field {
+  grid-column: 1 / -1;
+}
+
+.qb-field input,
+.qb-field select,
+.qb-filter select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid #d9d1c7;
+  border-radius: 10px;
+  padding: 0 11px;
+  background: #fffdf9;
+  color: #252320;
+  font: inherit;
+  font-weight: 500;
+}
+
+.qb-field input:focus,
+.qb-field select:focus,
+.qb-filter select:focus {
+  outline: 3px solid #9b362e24;
+  border-color: #9b362e;
+}
+
+.qb-file-drop {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 76px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1.5px dashed #c8bfb4;
+  border-radius: 13px;
+  background: #fffdf9;
+  cursor: pointer;
+}
+
+.qb-file-drop:focus-within {
+  outline: 3px solid #9b362e24;
+  border-color: #9b362e;
+}
+
+.qb-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.qb-file-badge,
+.qb-record-badge,
+.qb-empty-pdf {
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #f3e3df;
+  color: #9b362e;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.qb-file-badge {
+  width: 40px;
+  height: 44px;
+  flex: 0 0 40px;
+}
+
+.qb-file-copy,
+.qb-record-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.qb-file-copy strong,
+.qb-record-copy strong {
+  overflow: hidden;
+  color: #282622;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qb-file-copy small,
+.qb-record-copy small {
+  overflow: hidden;
+  color: #817b74;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qb-file-copy small {
+  font-size: 11px;
+}
+
+.qb-file-action {
+  margin-left: auto;
+  color: #9b362e;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.qb-add-button {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 11px;
+  background: #191817;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.qb-add-button:disabled {
+  opacity: .32;
+  cursor: not-allowed;
+}
+
+.qb-local-note {
+  margin: 9px 0 0;
+  color: #817b74;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.qb-feedback {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.qb-success {
+  color: #3d7156;
+}
+
+.qb-error {
+  color: #a43a31;
+}
+
+.qb-library-heading {
+  align-items: flex-start;
+  margin-bottom: 13px;
+}
+
+.qb-library-heading p {
+  font-size: 10px;
+}
+
+.qb-filters {
+  display: grid;
+  grid-template-columns: 110px 145px;
+  gap: 8px;
+}
+
+.qb-filter {
+  display: grid;
+  gap: 4px;
+  color: #746f68;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.qb-filter select {
+  min-height: 36px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.qb-record-list {
+  display: grid;
+  gap: 8px;
+  max-height: 330px;
+  overflow: auto;
+  margin: 0;
+  padding: 0 3px 0 0;
+  list-style: none;
+}
+
+.qb-record {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #e5dfd6;
+  border-radius: 12px;
+  background: #fffdf9;
+}
+
+.qb-record-badge {
+  width: 34px;
+  height: 38px;
+  flex: 0 0 34px;
+  font-size: 9px;
+}
+
+.qb-record-copy {
+  flex: 1 1 auto;
+}
+
+.qb-record-copy span {
+  overflow: hidden;
+  color: #625e58;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qb-preview-link {
+  flex: 0 0 auto;
+  border: 1px solid #d8d1c7;
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: #6f302a;
+  font-size: 10px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.qb-preview-link:hover {
+  border-color: #9b362e;
+  background: #fff8f5;
+}
+
+.qb-empty-state {
+  display: flex;
+  min-height: 188px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px dashed #d7cec3;
+  border-radius: 13px;
+  color: #807a73;
+  text-align: center;
+}
+
+.qb-empty-pdf {
+  width: 34px;
+  height: 38px;
+  margin-bottom: 3px;
+}
+
+.qb-empty-state strong {
+  color: #5e5952;
+  font-size: 12px;
+}
+
+.qb-empty-state span {
+  font-size: 10px;
+}
+
+@media (max-width: 980px) {
+  .qb-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .question-bank {
+    padding: 18px 14px;
+  }
+
+  .qb-heading,
+  .qb-library-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .qb-filters {
+    width: 100%;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .qb-upload-card,
+  .qb-library-card {
+    padding: 14px;
+  }
+
+  .qb-record {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .qb-preview-link {
+    margin-left: 44px;
+  }
+}

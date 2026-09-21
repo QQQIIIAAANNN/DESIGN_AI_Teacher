@@ -11,6 +11,7 @@ import {
   createMockReview,
   createMockSupplementReview
 } from "@/lib/review-mock";
+import QuestionBank from "./question-bank";
 
 const defaultDimensions = [
   "配置與機能",
@@ -222,7 +223,7 @@ export default function Home() {
 
       {isStaticDemo && (
         <p className="demo-notice" role="status">
-          這是靜態測試版：回饋為固定示範內容，不代表實際 AI 判讀。上傳圖面只在此瀏覽器預覽，不會傳到伺服器或保存。
+          這是靜態測試版：回饋為固定示範內容，不代表實際 AI 判讀。上傳圖面及題目 PDF 只在此瀏覽器預覽，不會傳到伺服器或保存。
         </p>
       )}
 
@@ -289,6 +290,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <QuestionBank />
 
       <section className="workspace">
         <div className="canvas-card">
