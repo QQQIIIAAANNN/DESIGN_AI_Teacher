@@ -1,4 +1,5 @@
 import "./globals.css";
+import "./demo.css";
 
 export const metadata = {
   title: "AI 審圖老師",

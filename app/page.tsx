@@ -7,6 +7,10 @@ import type {
   ReviewSeverity,
   SupplementReviewResult
 } from "@/lib/review-schema";
+import {
+  createMockReview,
+  createMockSupplementReview
+} from "@/lib/review-mock";
 
 const defaultDimensions = [
   "配置與機能",
@@ -22,6 +26,8 @@ const severityLabels: Record<ReviewSeverity, string> = {
   low: "低",
   info: "需補圖"
 };
+
+const isStaticDemo = process.env.NEXT_PUBLIC_STATIC_DEMO === "true";
 
 type SupplementState = {
   name: string;
@@ -80,21 +86,28 @@ export default function Home() {
     setReviewError("");
 
     try {
-      const formData = new FormData();
-      formData.append("drawing", drawingFile);
+      let nextReview: DrawingReview;
 
-      const response = await fetch("/api/review", {
-        method: "POST",
-        body: formData
-      });
+      if (isStaticDemo) {
+        nextReview = createMockReview(drawingFile.name);
+      } else {
+        const formData = new FormData();
+        formData.append("drawing", drawingFile);
 
-      const payload = await response.json();
+        const response = await fetch("/api/review", {
+          method: "POST",
+          body: formData
+        });
 
-      if (!response.ok) {
-        throw new Error(payload?.error ?? "審圖失敗");
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload?.error ?? "審圖失敗");
+        }
+
+        nextReview = payload as DrawingReview;
       }
 
-      const nextReview = payload as DrawingReview;
       setReview(nextReview);
       setActiveId(nextReview.issues[0]?.id ?? "");
     } catch (error) {
@@ -125,24 +138,30 @@ export default function Home() {
     }));
 
     try {
-      const formData = new FormData();
-      formData.append("crop", file);
-      formData.append("reviewId", review.reviewId);
-      formData.append("drawingId", review.drawingId);
-      formData.append("issue", JSON.stringify(issue));
+      let result: SupplementReviewResult;
 
-      const response = await fetch("/api/review/supplement", {
-        method: "POST",
-        body: formData
-      });
+      if (isStaticDemo) {
+        result = createMockSupplementReview(issue);
+      } else {
+        const formData = new FormData();
+        formData.append("crop", file);
+        formData.append("reviewId", review.reviewId);
+        formData.append("drawingId", review.drawingId);
+        formData.append("issue", JSON.stringify(issue));
 
-      const payload = await response.json();
+        const response = await fetch("/api/review/supplement", {
+          method: "POST",
+          body: formData
+        });
 
-      if (!response.ok) {
-        throw new Error(payload?.error ?? "局部精審失敗");
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload?.error ?? "局部精審失敗");
+        }
+
+        result = payload as SupplementReviewResult;
       }
-
-      const result = payload as SupplementReviewResult;
 
       setReview((current) => {
         if (!current) return current;
@@ -196,8 +215,16 @@ export default function Home() {
             建築設計 × 敷地繪圖，從「哪裡有問題」一路標到「可以怎麼改」。
           </p>
         </div>
-        <div className="status-pill">MVP v0.3 · Review + Crop API</div>
+        <div className={`status-pill ${isStaticDemo ? "demo-status" : ""}`}>
+          {isStaticDemo ? "GitHub Pages 測試版 · Mock 評圖" : "MVP v0.3 · Review + Crop API"}
+        </div>
       </header>
+
+      {isStaticDemo && (
+        <p className="demo-notice" role="status">
+          這是靜態測試版：回饋為固定示範內容，不代表實際 AI 判讀。上傳圖面只在此瀏覽器預覽，不會傳到伺服器或保存。
+        </p>
+      )}
 
       <section className="hero-grid">
         <div className="upload-card">
@@ -510,25 +537,48 @@ export default function Home() {
       <section className="roadmap">
         <div>
           <span className="step">ARCHITECTURE</span>
-          <h2>完整圖與局部補圖都已走 Review API</h2>
+          <h2>{isStaticDemo ? "GitHub Pages 互動測試" : "完整圖與局部補圖都已走 Review API"}</h2>
         </div>
         <div className="roadmap-grid">
-          <article>
-            <strong>/api/review</strong>
-            <p>完整圖進入全局審圖流程，產生問題、信心值與 clarity request。</p>
-          </article>
-          <article>
-            <strong>/api/review/supplement</strong>
-            <p>局部圖帶著原 issue context 回傳，避免失去整體配置關係。</p>
-          </article>
-          <article>
-            <strong>Patch Same Issue</strong>
-            <p>補圖結果回寫同一個 issue，保留完整的推理與修正歷程。</p>
-          </article>
-          <article>
-            <strong>Provider Adapter</strong>
-            <p>目前是 mock，下一步只需要接真正的 vision provider。</p>
-          </article>
+          {isStaticDemo ? (
+            <>
+              <article>
+                <strong>Mock 評圖</strong>
+                <p>按下開始後顯示固定示範回饋，不會呼叫 AI 模型。</p>
+              </article>
+              <article>
+                <strong>瀏覽器本機預覽</strong>
+                <p>原圖與補圖只用於目前頁面的預覽，不會上傳到網站。</p>
+              </article>
+              <article>
+                <strong>互動流程</strong>
+                <p>可切換問題、檢查 SVG 紅線，並體驗補圖後更新示範意見。</p>
+              </article>
+              <article>
+                <strong>靜態限制</strong>
+                <p>此測試版未連接伺服器 API、資料庫或正式 AI Provider。</p>
+              </article>
+            </>
+          ) : (
+            <>
+              <article>
+                <strong>/api/review</strong>
+                <p>完整圖進入全局審圖流程，產生問題、信心值與 clarity request。</p>
+              </article>
+              <article>
+                <strong>/api/review/supplement</strong>
+                <p>局部圖帶著原 issue context 回傳，避免失去整體配置關係。</p>
+              </article>
+              <article>
+                <strong>Patch Same Issue</strong>
+                <p>補圖結果回寫同一個 issue，保留完整的推理與修正歷程。</p>
+              </article>
+              <article>
+                <strong>Provider Adapter</strong>
+                <p>目前是 mock，下一步只需要接真正的 vision provider。</p>
+              </article>
+            </>
+          )}
         </div>
       </section>
     </main>

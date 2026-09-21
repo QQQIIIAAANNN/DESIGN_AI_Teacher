@@ -1,0 +1,16 @@
+.demo-notice {
+  margin: -10px 0 18px;
+  padding: 12px 15px;
+  border: 1px solid #e4d39f;
+  border-radius: 12px;
+  background: #fff8df;
+  color: #665322;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.demo-status {
+  border-color: #e4d39f;
+  background: #fff8df;
+  color: #665322;
+}
