@@ -635,7 +635,7 @@ export default function Home() {
               ? "AI 審圖中…"
               : liveReviewEnabled
                 ? "開始正式 AI 審圖"
-                : "開始示範審圖"}
+                : "開始審圖"}
           </button>
 
           {reviewError && <p className="error-text">{reviewError}</p>}
