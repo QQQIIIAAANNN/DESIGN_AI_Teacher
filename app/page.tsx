@@ -12,6 +12,7 @@ import {
   createMockSupplementReview
 } from "@/lib/review-mock";
 import QuestionBank from "./question-bank";
+import CliProxyOAuthPanel from "./cli-proxy-oauth";
 import {
   isImageSuggestionConfigured,
   isLiveReviewConfigured,
@@ -586,9 +587,7 @@ export default function Home() {
           {liveReviewEnabled
             ? "正式 AI 功能已設定：只有在此勾選同意並按下審圖後，原圖或局部補圖才會送至 Supabase Edge Function、私有 CLIProxyAPI 與其設定的上游模型；平台不會將原圖公開。"
             : "目前為 Mock 評圖，固定示範回饋不代表 AI 判讀。練習圖只在本機預覽。"}
-          {supabaseConnected
-            ? " 歷年題目 PDF 使用登入後的 Supabase 私有題庫。"
-            : " 題目 PDF 只在目前瀏覽器暫存；重新整理後清空。"}
+          {" 題庫目前採專案內靜態索引；自訂 PDF 只在目前瀏覽器暫存，重新整理後清空。"}
         </p>
       )}
 
@@ -673,6 +672,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <CliProxyOAuthPanel />
 
       <QuestionBank />
 

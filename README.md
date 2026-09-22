@@ -113,4 +113,4 @@ npm run dev
 
 ## Backend setup
 
-Supabase schema, private question-bank storage, invite-only sign-in, and the protected CLIProxyAPI Edge Function are documented in [docs/backend-setup.md](docs/backend-setup.md). The app remains in local Mock mode until a Supabase project and server-side secrets are configured.
+Supabase schema, optional private storage, invite-only sign-in, and the protected CLIProxyAPI Edge Function are documented in [docs/backend-setup.md](docs/backend-setup.md). The current question catalog is lightweight and project-local in [`data/question-bank.ts`](data/question-bank.ts); it links to official PDFs instead of redistributing unverified files. Codex / Antigravity OAuth setup is documented in [docs/cliproxyapi-oauth.md](docs/cliproxyapi-oauth.md). The app remains in local Mock mode until a Supabase project and server-side secrets are configured.
