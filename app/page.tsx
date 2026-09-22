@@ -7,11 +7,12 @@ import type {
   ReviewSeverity,
   SupplementReviewResult
 } from "@/lib/review-schema";
+import type { ProjectQuestion } from "@/data/question-bank";
 import {
   createMockReview,
   createMockSupplementReview
 } from "@/lib/review-mock";
-import QuestionBank from "./question-bank";
+import QuestionBank, { QuestionSelector } from "./question-bank";
 import CliProxyOAuthPanel from "./cli-proxy-oauth";
 import {
   isImageSuggestionConfigured,
@@ -78,6 +79,7 @@ export default function Home() {
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [selectedQuestion, setSelectedQuestion] = useState<ProjectQuestion | null>(null);
   const [supplements, setSupplements] = useState<Record<string, SupplementState>>({});
   const [suggestionGraphics, setSuggestionGraphics] = useState<Record<string, SuggestionGraphicState>>({});
   const [aiSuggestionGraphics, setAiSuggestionGraphics] = useState<Record<string, SuggestionGraphicState>>({});
@@ -422,6 +424,7 @@ export default function Home() {
       } else {
         const formData = new FormData();
         formData.append("drawing", drawingFile);
+        if (selectedQuestion) formData.append("question", JSON.stringify(selectedQuestion));
 
         const response = await fetch("/api/review", {
           method: "POST",
@@ -444,7 +447,9 @@ export default function Home() {
         try {
           const saved = await persistReviewSession(
             nextReview,
-            drawingFile.name,
+            selectedQuestion
+              ? `${selectedQuestion.year}年-${selectedQuestion.title}-${drawingFile.name}`
+              : drawingFile.name,
             (process.env.NEXT_PUBLIC_REVIEW_MODEL || "").trim()
           );
           setPersistedReview(saved);
@@ -577,19 +582,13 @@ export default function Home() {
             建築設計 × 敷地繪圖，從「哪裡有問題」一路標到「可以怎麼改」。
           </p>
         </div>
-        <div className={`status-pill ${isStaticDemo ? "demo-status" : ""}`}>
-          {isStaticDemo ? (liveReviewEnabled ? "GitHub Pages · 私有 AI 審圖" : "GitHub Pages 測試版 · Mock 評圖") : "MVP v0.3 · Review + Crop API"}
+        <div className="topbar-actions">
+          <CliProxyOAuthPanel />
+          <div className="status-pill">
+            {liveReviewEnabled ? "AI 服務已連線" : isStaticDemo ? "本機審圖模式" : "審圖服務已就緒"}
+          </div>
         </div>
       </header>
-
-      {isStaticDemo && (
-        <p className="demo-notice" role="status">
-          {liveReviewEnabled
-            ? "正式 AI 功能已設定：只有在此勾選同意並按下審圖後，原圖或局部補圖才會送至 Supabase Edge Function、私有 CLIProxyAPI 與其設定的上游模型；平台不會將原圖公開。"
-            : "目前為 Mock 評圖，固定示範回饋不代表 AI 判讀。練習圖只在本機預覽。"}
-          {" 題庫目前採專案內靜態索引；自訂 PDF 只在目前瀏覽器暫存，重新整理後清空。"}
-        </p>
-      )}
 
       <section className="hero-grid">
         <div className="upload-card">
@@ -620,6 +619,13 @@ export default function Home() {
             </label>
           )}
 
+          {selectedQuestion && (
+            <div className="selected-question-note">
+              <span>本次檢討題目</span>
+              <strong>{selectedQuestion.year} 年 · {selectedQuestion.title}</strong>
+            </div>
+          )}
+
           <button
             className="primary-btn"
             disabled={!drawingFile || isReviewing || (liveReviewEnabled && !aiConsent)}
@@ -636,44 +642,11 @@ export default function Home() {
           {persistenceNotice && <p className="status-note" role="status">{persistenceNotice}</p>}
         </div>
 
-        <div className="score-card">
-          <span className="step">02</span>
-          <h2>結構化評分</h2>
-          <div className="score-big">
-            <strong>{review?.overallScore ?? "--"}</strong>
-            <span>/ 100</span>
-          </div>
 
-          <div className="dimension-list">
-            {displayDimensions.map((dimension) => {
-              const hasScore =
-                dimension.score !== null && dimension.maxScore !== null;
 
-              return (
-                <div key={dimension.label} className="dimension-row">
-                  <span>{dimension.label}</span>
-                  <div className="meter">
-                    <i
-                      style={{
-                        width: hasScore
-                          ? `${(dimension.score / dimension.maxScore) * 100}%`
-                          : "0%"
-                      }}
-                    />
-                  </div>
-                  <b>
-                    {hasScore
-                      ? `${dimension.score}/${dimension.maxScore}`
-                      : "--"}
-                  </b>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+
+        <QuestionSelector onSelect={setSelectedQuestion} />
       </section>
-
-      <CliProxyOAuthPanel />
 
       <QuestionBank />
 
@@ -1008,53 +981,50 @@ export default function Home() {
         </aside>
       </section>
 
-      <section className="roadmap">
-        <div>
-          <span className="step">ARCHITECTURE</span>
-          <h2>{isStaticDemo ? (liveReviewEnabled ? "Supabase + CLIProxyAPI 測試版" : "GitHub Pages 互動測試") : "完整圖與局部補圖都已走 Review API"}</h2>
+
+      <section className="score-card score-summary" aria-labelledby="score-title">
+        <div className="section-head">
+          <div>
+            <span className="step">05</span>
+            <h2 id="score-title">結構化評分</h2>
+          </div>
+          <span className="issue-count">{review ? "本次審圖" : "等待審圖"}</span>
         </div>
-        <div className="roadmap-grid">
-          {isStaticDemo ? (
-            <>
-              <article>
-                <strong>Mock 評圖</strong>
-                <p>按下開始後顯示固定示範回饋，不會呼叫 AI 模型。</p>
-              </article>
-              <article>
-                <strong>瀏覽器本機預覽</strong>
-                <p>原圖與補圖只用於目前頁面的預覽，不會上傳到網站。</p>
-              </article>
-              <article>
-                <strong>互動流程</strong>
-                <p>可切換問題、檢查 SVG 紅線，並體驗補圖後更新示範意見。</p>
-              </article>
-              <article>
-                <strong>靜態限制</strong>
-                <p>此測試版未連接伺服器 API、資料庫或正式 AI Provider。</p>
-              </article>
-            </>
-          ) : (
-            <>
-              <article>
-                <strong>/api/review</strong>
-                <p>完整圖進入全局審圖流程，產生問題、信心值與 clarity request。</p>
-              </article>
-              <article>
-                <strong>/api/review/supplement</strong>
-                <p>局部圖帶著原 issue context 回傳，避免失去整體配置關係。</p>
-              </article>
-              <article>
-                <strong>Patch Same Issue</strong>
-                <p>補圖結果回寫同一個 issue，保留完整的推理與修正歷程。</p>
-              </article>
-              <article>
-                <strong>Provider Adapter</strong>
-                <p>目前是 mock，下一步只需要接真正的 vision provider。</p>
-              </article>
-            </>
-          )}
+        <div className="score-summary-body">
+          <div className="score-big">
+            <strong>{review?.overallScore ?? "--"}</strong>
+            <span>/ 100</span>
+          </div>
+
+          <div className="dimension-list">
+            {displayDimensions.map((dimension) => {
+              const hasScore =
+                dimension.score !== null && dimension.maxScore !== null;
+
+              return (
+                <div key={dimension.label} className="dimension-row">
+                  <span>{dimension.label}</span>
+                  <div className="meter">
+                    <i
+                      style={{
+                        width: hasScore
+                          ? `${(dimension.score / dimension.maxScore) * 100}%`
+                          : "0%"
+                      }}
+                    />
+                  </div>
+                  <b>
+                    {hasScore
+                      ? `${dimension.score}/${dimension.maxScore}`
+                      : "--"}
+                  </b>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </section>
+
     </main>
   );
 }

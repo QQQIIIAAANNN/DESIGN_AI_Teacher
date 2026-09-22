@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import {
   questionBankCatalog,
@@ -31,6 +31,84 @@ function formatFileSize(size: number) {
   if (!size) return "官方來源";
   if (size < 1024 * 1024) return Math.round(size / 1024) + " KB";
   return (size / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+
+export function QuestionSelector({
+  onSelect
+}: {
+  onSelect: (question: ProjectQuestion) => void;
+}) {
+  const years = useMemo(
+    () => Array.from({ length: 25 }, (_, index) => 114 - index),
+    []
+  );
+  const [year, setYear] = useState("114");
+  const [category, setCategory] = useState<QuestionCategory>("architectural_design");
+  const selected = useMemo(
+    () =>
+      questionBankCatalog.find(
+        (question) => question.year === Number(year) && question.category === category
+      ) ?? null,
+    [category, year]
+  );
+
+  useEffect(() => {
+    if (selected) onSelect(selected);
+  }, [onSelect, selected]);
+
+  return (
+    <section className="question-selector-card" aria-labelledby="question-selector-title">
+      <div className="question-selector-heading">
+        <div>
+          <span className="step">02 · REVIEW TARGET</span>
+          <h2 id="question-selector-title">選擇本次檢討題目</h2>
+          <p>先指定年份與題型，審圖時會以這一題作為練習脈絡。</p>
+        </div>
+        <span className="qb-local-chip">90–114 年</span>
+      </div>
+
+      <div className="question-selector-fields">
+        <label className="qb-field">
+          <span>題目年度</span>
+          <select value={year} onChange={(event) => setYear(event.target.value)}>
+            {years.map((item) => (
+              <option key={item} value={String(item)}>{item} 年</option>
+            ))}
+          </select>
+        </label>
+        <label className="qb-field">
+          <span>題目類別</span>
+          <select
+            value={category}
+            onChange={(event) => setCategory(event.target.value as QuestionCategory)}
+          >
+            {questionCategories.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {selected ? (
+        <div className="selected-question-card">
+          <div>
+            <span>{selected.year} 年 · {categoryLabel(selected.category)} · {selected.topic}</span>
+            <strong>{selected.title}</strong>
+          </div>
+          <a
+            href={selected.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            開啟題目 PDF
+          </a>
+        </div>
+      ) : (
+        <p className="question-selector-empty">這個年份目前沒有該題型索引。</p>
+      )}
+    </section>
+  );
 }
 
 export default function QuestionBank() {
@@ -158,6 +236,11 @@ export default function QuestionBank() {
       </div>
 
       <div className="qb-layout">
+        <details className="qb-extension">
+          <summary className="qb-extension-summary">
+            <span>延伸功能：新增自訂題目 PDF</span>
+            <span>展開</span>
+          </summary>
         <form className="qb-upload-card" onSubmit={handleAddQuestion}>
           <div className="qb-card-heading">
             <span className="qb-step-number">01</span>
@@ -223,6 +306,7 @@ export default function QuestionBank() {
             這個按鈕只建立本機預覽；要寫入專案，仍需將 PDF 授權與 metadata 一起提交審核。
           </p>
         </form>
+        </details>
 
         <div className="qb-library-card">
           <div className="qb-library-heading">

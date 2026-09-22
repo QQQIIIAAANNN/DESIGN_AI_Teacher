@@ -59,7 +59,7 @@ Mock 模式不會傳送圖面。正式 AI 審圖只有在使用者勾選同意�
 
 ## CLIProxyAPI OAuth 登入
 
-Codex 與 Antigravity 的 OAuth 登入入口、管理密鑰與遠端 CORS 注意事項，請依 [CLIProxyAPI OAuth 登入說明](./cliproxyapi-oauth.md) 設定。這個流程不使用供應商 API key。
+Codex 與 Antigravity OAuth 由 CLIProxyAPI 原生管理中心或本機命令列完成；本站只提供設定按鈕、管理中心連結與登入指令複製，不呼叫 Management API，也不收集供應商 API key。請依 [CLIProxyAPI OAuth 登入設定](./cliproxyapi-oauth.md) 操作。
 
 ## CLIProxyAPI 部署檢查
 
