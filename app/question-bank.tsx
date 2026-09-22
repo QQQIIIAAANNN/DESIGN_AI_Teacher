@@ -108,8 +108,60 @@ export function QuestionSelector({
         <p className="question-selector-empty">這個年份目前沒有該題型索引。</p>
       )}
 
-      <QuestionBank compact />
     </section>
+  );
+}
+
+export function QuestionBankPanel() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="question-bank-settings">
+      <button
+        type="button"
+        className="question-bank-settings-trigger"
+        aria-expanded={isOpen}
+        aria-controls="question-bank-settings-panel"
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span aria-hidden="true">▤</span>
+        歷年試題資料庫
+      </button>
+
+      {isOpen && (
+        <section
+          id="question-bank-settings-panel"
+          className="question-bank-settings-panel"
+          aria-labelledby="question-bank-settings-title"
+        >
+          <div className="question-bank-settings-heading">
+            <div>
+              <span className="step">QUESTION ARCHIVE</span>
+              <h2 id="question-bank-settings-title">歷年試題資料庫</h2>
+            </div>
+            <button
+              type="button"
+              className="question-bank-settings-close"
+              onClick={() => setIsOpen(false)}
+              aria-label="關閉歷年試題資料庫"
+            >
+              ×
+            </button>
+          </div>
+          <p className="question-bank-settings-copy">
+            民國 90–114 年建築設計、敷地計畫與公務人員高考三級索引；題目 PDF 維持官方來源連結。
+            <a
+              href="https://vocus.cc/article/66d08494fd89780001ee494f"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              查看索引來源
+            </a>
+          </p>
+          <QuestionBank compact />
+        </section>
+      )}
+    </div>
   );
 }
 

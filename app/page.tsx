@@ -12,7 +12,7 @@ import {
   createMockReview,
   createMockSupplementReview
 } from "@/lib/review-mock";
-import { QuestionSelector } from "./question-bank";
+import { QuestionBankPanel, QuestionSelector } from "./question-bank";
 import CliProxyOAuthPanel from "./cli-proxy-oauth";
 import {
   isImageSuggestionConfigured,
@@ -583,6 +583,7 @@ export default function Home() {
           </p>
         </div>
         <div className="topbar-actions">
+          <QuestionBankPanel />
           <CliProxyOAuthPanel />
           <div className="status-pill">
             {liveReviewEnabled ? "AI 服務已連線" : isStaticDemo ? "本機審圖模式" : "審圖服務已就緒"}
