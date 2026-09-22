@@ -15,7 +15,11 @@ import QuestionBank from "./question-bank";
 import {
   isImageSuggestionConfigured,
   isLiveReviewConfigured,
-  isSupabaseConfigured
+  isSupabaseConfigured,
+  persistReviewSession,
+  saveSuggestionImage,
+  updatePersistedReviewFinding,
+  updatePersistedReviewPayload
 } from "@/lib/supabase-browser";
 import {
   generateIssueSuggestionImage,
@@ -56,6 +60,11 @@ type SuggestionGraphicState = {
   message?: string;
 };
 
+type PersistedReviewState = {
+  sessionId: string;
+  findingIds: Record<string, string>;
+};
+
 function svgValue(value: number) {
   return value * 100;
 }
@@ -72,6 +81,8 @@ export default function Home() {
   const [suggestionGraphics, setSuggestionGraphics] = useState<Record<string, SuggestionGraphicState>>({});
   const [aiSuggestionGraphics, setAiSuggestionGraphics] = useState<Record<string, SuggestionGraphicState>>({});
   const [aiConsent, setAiConsent] = useState(false);
+  const [persistedReview, setPersistedReview] = useState<PersistedReviewState | null>(null);
+  const [persistenceNotice, setPersistenceNotice] = useState("");
   const suggestionGraphicUrls = useRef<string[]>([]);
   const aiSuggestionGraphicUrls = useRef<string[]>([]);
 
@@ -322,15 +333,45 @@ export default function Home() {
 
     try {
       const result = await generateIssueSuggestionImage(imageUrl, issue);
-      const url = result.blob ? URL.createObjectURL(result.blob) : result.remoteUrl;
+      let url = result.blob ? URL.createObjectURL(result.blob) : result.remoteUrl;
       if (result.blob) aiSuggestionGraphicUrls.current.push(url);
+
+      let message =
+        "由 AI 參考此問題區域與修改方向生成；請再自行核對比例、法規與設計完整性。";
+      const findingId = persistedReview?.findingIds[issue.id];
+      if (result.blob && persistedReview && findingId) {
+        try {
+          const saved = await saveSuggestionImage(
+            persistedReview.sessionId,
+            findingId,
+            result.blob,
+            (process.env.NEXT_PUBLIC_IMAGE_MODEL || "").trim()
+          );
+          if (url.startsWith("blob:")) {
+            URL.revokeObjectURL(url);
+            aiSuggestionGraphicUrls.current = aiSuggestionGraphicUrls.current.filter(
+              (candidate) => candidate !== url
+            );
+          }
+          url = saved.signedUrl;
+          message += " 已保存至 Supabase 私有儲存，僅限本人登入後預覽。";
+        } catch (error) {
+          setPersistenceNotice(
+            error instanceof Error
+              ? "建議圖已在本機產生，但私有保存失敗：" + error.message
+              : "建議圖已在本機產生，但私有保存失敗。"
+          );
+          message += " 本次先保留在瀏覽器，私有保存稍後可重試。";
+        }
+      } else if (result.blob && !persistedReview) {
+        message += " 本次審圖尚未建立雲端紀錄，因此只保留在瀏覽器。";
+      } else if (result.remoteUrl) {
+        message += " 上游回傳遠端預覽連結，未複製到平台儲存。";
+      }
+
       setAiSuggestionGraphics((current) => ({
         ...current,
-        [issue.id]: {
-          status: "ready",
-          url,
-          message: "由 AI 參考此問題區域與修改方向生成；請再自行核對比例、法規與設計完整性。"
-        }
+        [issue.id]: { status: "ready", url, message }
       }));
     } catch (error) {
       setAiSuggestionGraphics((current) => ({
@@ -355,6 +396,8 @@ export default function Home() {
     setReviewError("");
     setSupplements({});
     setAiConsent(false);
+    setPersistedReview(null);
+    setPersistenceNotice("");
     clearSuggestionGraphics();
   }
 
@@ -363,6 +406,8 @@ export default function Home() {
 
     setIsReviewing(true);
     setReviewError("");
+    setPersistenceNotice("");
+    setPersistedReview(null);
     clearSuggestionGraphics();
 
     try {
@@ -393,6 +438,23 @@ export default function Home() {
 
       setReview(nextReview);
       setActiveId(nextReview.issues[0]?.id ?? "");
+
+      if (liveReviewEnabled && supabaseConnected) {
+        try {
+          const saved = await persistReviewSession(
+            nextReview,
+            drawingFile.name,
+            (process.env.NEXT_PUBLIC_REVIEW_MODEL || "").trim()
+          );
+          setPersistedReview(saved);
+        } catch (error) {
+          setPersistenceNotice(
+            error instanceof Error
+              ? "AI 審圖已完成，但雲端紀錄保存失敗：" + error.message
+              : "AI 審圖已完成，但雲端紀錄保存失敗；本次仍可繼續使用。"
+          );
+        }
+      }
     } catch (error) {
       setReviewError(
         error instanceof Error ? error.message : "審圖流程發生錯誤。"
@@ -449,21 +511,34 @@ export default function Home() {
         result = payload as SupplementReviewResult;
       }
 
-      setReview((current) => {
-        if (!current) return current;
+      const nextIssues = review.issues.map((currentIssue) =>
+        currentIssue.id === issue.id ? result.issue : currentIssue
+      );
+      const nextReview: DrawingReview = {
+        ...review,
+        issues: nextIssues,
+        needsSupplement: nextIssues.some(
+          (currentIssue) => currentIssue.kind === "clarity_request"
+        )
+      };
+      setReview(nextReview);
 
-        const nextIssues = current.issues.map((currentIssue) =>
-          currentIssue.id === issue.id ? result.issue : currentIssue
-        );
-
-        return {
-          ...current,
-          issues: nextIssues,
-          needsSupplement: nextIssues.some(
-            (currentIssue) => currentIssue.kind === "clarity_request"
-          )
-        };
-      });
+      if (liveReviewEnabled && persistedReview?.findingIds[issue.id]) {
+        try {
+          await updatePersistedReviewFinding(
+            persistedReview.sessionId,
+            persistedReview.findingIds[issue.id],
+            result.issue
+          );
+          await updatePersistedReviewPayload(persistedReview.sessionId, nextReview);
+        } catch (error) {
+          setPersistenceNotice(
+            error instanceof Error
+              ? "局部精審已完成，但雲端紀錄更新失敗：" + error.message
+              : "局部精審已完成，但雲端紀錄更新失敗。"
+          );
+        }
+      }
 
       setSupplements((current) => ({
         ...current,
@@ -559,6 +634,7 @@ export default function Home() {
           </button>
 
           {reviewError && <p className="error-text">{reviewError}</p>}
+          {persistenceNotice && <p className="status-note" role="status">{persistenceNotice}</p>}
         </div>
 
         <div className="score-card">

@@ -1,3 +1,5 @@
+import type { DrawingReview, ReviewItem } from "@/lib/review-schema";
+
 export type SupabaseBrowserUser = {
   id: string;
   email?: string;
@@ -417,4 +419,217 @@ export async function publishQuestionPaper(session: SupabaseBrowserSession, ques
   );
   if (!rows[0]) throw new Error("題目仍未發布，請確認目前帳號是否有題庫整理權限。");
   return rows[0];
+}
+
+
+export type PersistedReview = {
+  sessionId: string;
+  findingIds: Record<string, string>;
+};
+
+export type SavedSuggestionImage = {
+  id: string;
+  storagePath: string;
+  signedUrl: string;
+};
+
+async function requireActiveSession() {
+  const session = await getSavedSession();
+  if (!session || !isActiveMember(session.user)) {
+    throw new Error("請先用已核准的帳號登入，才能保存審圖紀錄。");
+  }
+  return session;
+}
+
+function findingRecord(reviewId: string, issue: ReviewItem) {
+  return {
+    review_id: reviewId,
+    finding_key: issue.id,
+    kind: issue.kind,
+    category: issue.category,
+    severity: issue.severity,
+    score_impact: issue.scoreImpact,
+    confidence: issue.confidence,
+    visibility_status: issue.visibilityStatus,
+    title: issue.title,
+    description: issue.description,
+    suggestion: issue.suggestion,
+    bbox: issue.bbox,
+    redline: issue.redline ?? null,
+    crop_request: issue.cropRequest ?? null
+  };
+}
+
+export async function persistReviewSession(
+  review: DrawingReview,
+  drawingName: string,
+  modelSlug: string
+): Promise<PersistedReview> {
+  const session = await requireActiveSession();
+  const sessionRows = await authorizedJson<Array<{ id: string }>>(
+    session,
+    "rest/v1/review_sessions?select=id",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Prefer: "return=representation"
+      },
+      body: JSON.stringify({
+        drawing_name: drawingName.trim().slice(0, 500) || "未命名圖面",
+        model_slug: modelSlug.trim().slice(0, 200) || "unknown",
+        status: "completed",
+        overall_score: review.overallScore,
+        review_payload: review
+      })
+    }
+  );
+  const reviewId = sessionRows[0]?.id;
+  if (!reviewId) throw new Error("審圖完成，但資料庫沒有建立審圖紀錄。");
+
+  try {
+    const rows = review.issues.length
+      ? await authorizedJson<Array<{ id: string; finding_key: string }>>(
+          session,
+          "rest/v1/review_findings?select=id,finding_key",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Prefer: "return=representation"
+            },
+            body: JSON.stringify(review.issues.map((issue) => findingRecord(reviewId, issue)))
+          }
+        )
+      : [];
+    const findingIds: Record<string, string> = {};
+    rows.forEach((row) => {
+      if (row.finding_key && row.id) findingIds[row.finding_key] = row.id;
+    });
+    return { sessionId: reviewId, findingIds };
+  } catch (error) {
+    await authorizedFetch(
+      session,
+      "rest/v1/review_sessions?id=eq." + encodeURIComponent(reviewId),
+      { method: "DELETE" }
+    ).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function updatePersistedReviewFinding(
+  reviewId: string,
+  findingId: string,
+  issue: ReviewItem
+) {
+  const session = await requireActiveSession();
+  await authorizedJson(
+    session,
+    "rest/v1/review_findings?id=eq." + encodeURIComponent(findingId) +
+      "&review_id=eq." + encodeURIComponent(reviewId),
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Prefer: "return=minimal"
+      },
+      body: JSON.stringify(findingRecord(reviewId, issue))
+    }
+  );
+}
+
+export async function updatePersistedReviewPayload(
+  reviewId: string,
+  review: DrawingReview
+) {
+  const session = await requireActiveSession();
+  await authorizedJson(
+    session,
+    "rest/v1/review_sessions?id=eq." + encodeURIComponent(reviewId),
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Prefer: "return=minimal"
+      },
+      body: JSON.stringify({
+        overall_score: review.overallScore,
+        review_payload: review
+      })
+    }
+  );
+}
+
+export async function saveSuggestionImage(
+  reviewId: string,
+  findingId: string,
+  image: Blob,
+  modelSlug: string
+): Promise<SavedSuggestionImage> {
+  if (image.size > 20 * 1024 * 1024) {
+    throw new Error("AI 建議圖超過私有儲存的大小限制。");
+  }
+  const session = await requireActiveSession();
+  const id = crypto.randomUUID();
+  const storagePath =
+    session.user.id + "/" + reviewId + "/" + findingId + "/" + id + ".png";
+  const encodedPath = storagePath.split("/").map(encodeURIComponent).join("/");
+  const uploadResponse = await authorizedFetch(
+    session,
+    "storage/v1/object/suggestion-images/" + encodedPath,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "image/png",
+        "x-upsert": "false",
+        "cache-control": "3600"
+      },
+      body: image
+    }
+  );
+  if (!uploadResponse.ok) throw new Error(await responseError(uploadResponse));
+
+  const rows = await authorizedJson<Array<{ id: string }>>(
+    session,
+    "rest/v1/suggestion_images?select=id",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Prefer: "return=representation"
+      },
+      body: JSON.stringify({
+        review_id: reviewId,
+        finding_id: findingId,
+        storage_path: storagePath,
+        model_slug: modelSlug.trim().slice(0, 200) || "unknown"
+      })
+    }
+  );
+  const imageId = rows[0]?.id;
+  if (!imageId) throw new Error("建議圖已上傳，但索引沒有成功建立。");
+
+  const signed = await authorizedJson<{ signedURL?: string }>(
+    session,
+    "storage/v1/object/sign/suggestion-images/" + encodedPath,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expiresIn: 3600 })
+    }
+  );
+  if (!signed.signedURL) throw new Error("無法建立建議圖的私有預覽連結。");
+
+  const config = getSupabaseConfig();
+  if (!config) throw new Error("尚未設定 Supabase 專案。");
+  const signedUrl = /^https?:\/\//i.test(signed.signedURL)
+    ? signed.signedURL
+    : config.url + (
+        signed.signedURL.startsWith("/storage/v1/")
+          ? signed.signedURL
+          : "/storage/v1" + (
+              signed.signedURL.startsWith("/") ? signed.signedURL : "/" + signed.signedURL
+            )
+      );
+  return { id: imageId, storagePath, signedUrl };
 }

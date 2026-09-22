@@ -2,7 +2,7 @@
 
 ## 目前狀態
 
-這個分支已加入 Supabase migration、登入後的私有題庫介面，以及 Supabase Edge Function 到 CLIProxyAPI 的 AI 代理程式。GitHub Pages 仍是公開的靜態前端；沒有 Supabase 專案設定時，題目區維持本機暫存、審圖維持 Mock，不會嘗試連線。
+這個分支已加入 Supabase migration、登入後的私有題庫介面、審圖紀錄 / SVG 問題保存，以及 Supabase Edge Function 到 CLIProxyAPI 的 AI 代理程式。GitHub Pages 仍是公開的靜態前端；沒有 Supabase 專案設定時，題目區維持本機暫存、審圖維持 Mock，不會嘗試連線。
 
 尚未提供 Supabase 專案，也尚未部署 Edge Function 或設定 CLIProxyAPI 主機，所以目前不是已連線的正式服務。不要把 service-role / secret key、CLIProxyAPI API key、CLIProxyAPI auth-dir、Codex / Antigravity 憑證放入 GitHub Pages、NEXT_PUBLIC 變數或程式碼。
 
@@ -53,9 +53,13 @@ Edge Function 僅接受已登入且 membership_status 為 active 的帳號、明
 
 ## 圖面與建議圖的資料處理
 
-Mock 模式不會傳送圖面。正式 AI 審圖只有在使用者勾選同意並按下審圖後，才會將完整圖面經 Supabase Edge Function 傳到 CLIProxyAPI 與其設定的上游模型。單項 AI 建議圖只傳送 SVG 問題框周邊裁圖與該項文字，不會覆寫原圖；目前生成結果留在瀏覽器供預覽 / 下載，不會自動保存到 suggestion-images bucket。使用前應確認上游模型的資料處理、費用、使用條款以及你是否有權上傳該圖面。
+Mock 模式不會傳送圖面。正式 AI 審圖只有在使用者勾選同意並按下審圖後，才會將完整圖面經 Supabase Edge Function 傳到 CLIProxyAPI 與其設定的上游模型。審圖完成後，結構化結果會保存到該帳號的 `review_sessions` / `review_findings`，包含 SVG bbox、紅線與補圖要求；RLS 不允許其他帳號讀取。單項 AI 建議圖只傳送 SVG 問題框周邊裁圖與該項文字，不會覆寫原圖；若模型回傳 PNG，平台會把它放進私有 `suggestion-images` bucket 並以短時效 signed URL 預覽；若模型只回傳遠端 URL，則不會替它複製或公開保存。使用前應確認上游模型的資料處理、費用、使用條款以及你是否有權上傳該圖面。
 
 題目 PDF 在資料庫中先以 draft 狀態保留，核對檔案授權與題目資料後再發布；不要把未獲授權的講義、評圖或題目設成已發布。
+
+## CLIProxyAPI 部署檢查
+
+CLIProxyAPI 的私有服務設定、模型健康檢查與上線後核對，請依 [CLIProxyAPI 私有服務檢查表](./cliproxyapi-checklist.md) 執行。該檢查表刻意不放任何真實 API key、OAuth auth-dir 或管理密鑰。
 
 ## 資料表範圍
 
