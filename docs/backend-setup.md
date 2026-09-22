@@ -68,3 +68,14 @@ CLIProxyAPI 的私有服務設定、模型健康檢查與上線後核對，請�
 ## 資料表範圍
 
 Migration 包含年度題目索引與私有 PDF 儲存、講師與案例來源、knowledge units、image regions 與知識 / 圖像關聯、個人 review sessions、SVG-located review findings、個別 suggestion image 索引，以及 AI 每日配額。knowledge unit 保留 building_type、topic_key、provenance、頁碼和七種 knowledge_type，避免把老師偏好或案例誤當成 hard_rule。
+
+
+## 本機優先運行（目前建議）
+
+公開 GitHub Pages 先保留作為介面與靜態 Mock；需要實際憑證與後端時，改在本機執行 `start-local.bat`。目前啟動器會：
+
+1. 啟動 Next.js 前端 `http://127.0.0.1:3000`。
+2. 若找到 CLIProxyAPI，啟動本機 `http://127.0.0.1:8317`。
+3. 由 CLIProxyAPI 原生管理中心或 `--codex-login`／`--antigravity-login` 完成 OAuth。
+
+OAuth 憑證只由 CLIProxyAPI 保存在自己的 `auth-dir`。完整本地審圖後端仍應放在 localhost 或受限內網，瀏覽器不直接接觸 auth-dir，也不要把 CLIProxyAPI Management API 公開到網際網路；本分支尚未把公開 Pages 自動切換成此本地後端。

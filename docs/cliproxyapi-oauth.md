@@ -39,3 +39,28 @@ http://127.0.0.1:8317/management.html
 - [Codex OAuth](https://help.router-for.me/configuration/provider/codex)
 - [Antigravity OAuth](https://help.router-for.me/configuration/provider/antigravity)
 - [CLIProxyAPI Web UI](https://help.router-for.me/management/webui)
+
+
+## Windows 本機快速入口
+
+專案根目錄的 `start-local.bat` 會啟動本機 Next.js 前端；若 `CLIPROXY_BIN` 已指向 CLIProxyAPI 執行檔，也會另開視窗啟動 CLIProxyAPI：
+
+```bat
+start-local.bat
+```
+
+登入與管理中心可直接使用：
+
+```bat
+start-local.bat codex-login
+start-local.bat antigravity-login
+start-local.bat management
+```
+
+若執行檔不在 PATH，先設定：
+
+```bat
+set CLIPROXY_BIN=C:\path\to\cli-proxy-api.exe
+```
+
+這些入口只呼叫 CLIProxyAPI 的原生 OAuth 命令；不會把 OAuth token、auth-dir、管理密鑰或供應商 API key 傳到 GitHub Pages。
