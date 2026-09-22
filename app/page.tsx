@@ -12,7 +12,7 @@ import {
   createMockReview,
   createMockSupplementReview
 } from "@/lib/review-mock";
-import QuestionBank, { QuestionSelector } from "./question-bank";
+import { QuestionSelector } from "./question-bank";
 import CliProxyOAuthPanel from "./cli-proxy-oauth";
 import {
   isImageSuggestionConfigured,
@@ -647,8 +647,6 @@ export default function Home() {
 
         <QuestionSelector onSelect={setSelectedQuestion} />
       </section>
-
-      <QuestionBank />
 
       <section className="workspace">
         <div className="canvas-card">

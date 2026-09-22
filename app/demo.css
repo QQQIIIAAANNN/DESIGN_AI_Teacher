@@ -1222,3 +1222,129 @@
     flex-direction: column;
   }
 }
+
+
+/* Keep the question archive secondary to the review target. */
+.question-bank-compact {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #e5dfd6;
+  border-radius: 16px;
+  background: #faf7f2;
+  box-shadow: none;
+}
+
+.qb-compact-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.qb-compact-heading h3 {
+  margin: 4px 0 0;
+  color: #282622;
+  font-size: 14px;
+  letter-spacing: -.01em;
+}
+
+.question-bank-compact .qb-local-chip {
+  padding: 5px 9px;
+  font-size: 10px;
+}
+
+.question-bank-compact .qb-layout {
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.question-bank-compact .qb-library-card {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.question-bank-compact .qb-library-heading {
+  align-items: center;
+  margin-bottom: 9px;
+}
+
+.question-bank-compact .qb-library-heading h3 {
+  font-size: 13px;
+}
+
+.question-bank-compact .qb-library-heading p {
+  font-size: 10px;
+}
+
+.question-bank-compact .qb-filters {
+  grid-template-columns: 86px 116px;
+  gap: 6px;
+}
+
+.question-bank-compact .qb-filter select {
+  min-height: 32px;
+  font-size: 10px;
+}
+
+.question-bank-compact .qb-record-list {
+  max-height: 210px;
+  gap: 6px;
+}
+
+.question-bank-compact .qb-record {
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 10px;
+}
+
+.question-bank-compact .qb-record-badge {
+  width: 28px;
+  height: 31px;
+  flex-basis: 28px;
+  font-size: 8px;
+}
+
+.question-bank-compact .qb-record-copy strong {
+  font-size: 11px;
+}
+
+.question-bank-compact .qb-record-copy span,
+.question-bank-compact .qb-record-copy small {
+  font-size: 9px;
+}
+
+.question-bank-compact .qb-preview-link {
+  padding: 6px 8px;
+  font-size: 9px;
+}
+
+.question-bank-compact .qb-extension-summary {
+  min-height: 38px;
+  padding: 0 11px;
+  font-size: 10px;
+}
+
+.question-bank-compact .qb-extension > .qb-upload-card {
+  padding: 12px;
+}
+
+@media (max-width: 640px) {
+  .question-bank-compact {
+    padding: 12px;
+  }
+
+  .question-bank-compact .qb-library-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .question-bank-compact .qb-filters {
+    width: 100%;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .question-bank-compact .qb-record-list {
+    max-height: 230px;
+  }
+}

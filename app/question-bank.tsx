@@ -107,11 +107,13 @@ export function QuestionSelector({
       ) : (
         <p className="question-selector-empty">這個年份目前沒有該題型索引。</p>
       )}
+
+      <QuestionBank compact />
     </section>
   );
 }
 
-export default function QuestionBank() {
+export default function QuestionBank({ compact = false }: { compact?: boolean }) {
   const years = useMemo(
     () => Array.from({ length: 25 }, (_, index) => 114 - index),
     []
@@ -217,23 +219,38 @@ export default function QuestionBank() {
   }
 
   return (
-    <section className="question-bank" aria-labelledby="question-bank-title">
-      <div className="qb-heading">
-        <div>
-          <span className="step">QUESTION BANK</span>
-          <h2 id="question-bank-title">歷年試題資料庫</h2>
-          <p>專案內建民國 90–114 年建築設計、敷地計畫與公務人員高考三級索引。</p>
+    <section
+      className={compact ? "question-bank question-bank-compact" : "question-bank"}
+      aria-labelledby="question-bank-title"
+    >
+      {compact ? (
+        <div className="qb-compact-heading">
+          <div>
+            <span className="step">QUESTION BANK</span>
+            <h3 id="question-bank-title">歷年試題資料庫</h3>
+          </div>
+          <span className="qb-local-chip">{questions.length} 份索引</span>
         </div>
-        <span className="qb-local-chip">專案內建索引 · 外部官方 PDF</span>
-      </div>
+      ) : (
+        <div className="qb-heading">
+          <div>
+            <span className="step">QUESTION BANK</span>
+            <h2 id="question-bank-title">歷年試題資料庫</h2>
+            <p>專案內建民國 90–114 年建築設計、敷地計畫與公務人員高考三級索引。</p>
+          </div>
+          <span className="qb-local-chip">專案內建索引 · 外部官方 PDF</span>
+        </div>
+      )}
 
-      <div className="qb-source-note">
-        題目索引來源：
-        <a href="https://vocus.cc/article/66d08494fd89780001ee494f" target="_blank" rel="noopener noreferrer">
-          施明宏建築師的歷屆考題索引
-        </a>
-        。目前保留官方來源連結，不把未確認授權的 PDF 複製進公開專案。
-      </div>
+      {!compact && (
+        <div className="qb-source-note">
+          題目索引來源：
+          <a href="https://vocus.cc/article/66d08494fd89780001ee494f" target="_blank" rel="noopener noreferrer">
+            施明宏建築師的歷屆考題索引
+          </a>
+          。目前保留官方來源連結，不把未確認授權的 PDF 複製進公開專案。
+        </div>
+      )}
 
       <div className="qb-layout">
         <details className="qb-extension">
