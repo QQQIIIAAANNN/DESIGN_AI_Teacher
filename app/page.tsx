@@ -588,7 +588,7 @@ export default function Home() {
   }
 
   async function handleGenerateSuggestion(issue: ReviewItem) {
-    if (!imageUrl || issue.kind !== "issue") return;
+    if (!imageUrl || issue.kind !== "issue" || issue.locationUnresolved) return;
     if (!isLocalModelReady) {
       setReviewError("請先連接可用的圖片模型。");
       return;
@@ -895,7 +895,8 @@ export default function Home() {
       }
 
       const updatedIssue = issue.locationConfirmed
-        ? { ...result.issue, bbox: issue.bbox, locationConfidence: 1, locationConfirmed: true, locationPinned: issue.locationPinned }
+        ? { ...result.issue, bbox: issue.bbox, locationConfidence: 1, locationConfirmed: true,
+          locationPinned: issue.locationPinned, locationUnresolved: false }
         : result.issue;
       const nextIssues = review.issues.map((currentIssue) =>
         currentIssue.id === issue.id ? updatedIssue : currentIssue
@@ -904,7 +905,7 @@ export default function Home() {
         ...review,
         issues: nextIssues,
         needsSupplement: nextIssues.some(
-          (currentIssue) => currentIssue.kind === "clarity_request"
+          (currentIssue) => currentIssue.kind === "clarity_request" || currentIssue.locationUnresolved
         )
       };
       if (nextReview.observations) {
@@ -959,11 +960,13 @@ export default function Home() {
   }
 
   function saveIssueRegion(issue: ReviewItem, bbox: ReviewItem["bbox"], pinned = issue.locationPinned === true) {
-    setConfirmedRegions((current) => [...current.filter((region) => region.title !== issue.title),
-      { title: issue.title, featureTag: issue.featureTag, bbox, pinned }]);
+    setConfirmedRegions((current) => [...current.filter((region) =>
+      region.issueId ? region.issueId !== issue.id : region.title !== issue.title),
+      { issueId: issue.id, title: issue.title, featureTag: issue.featureTag, bbox, pinned }]);
     setReview((current) => current ? { ...current, scoreStale: true, overallScore: null,
       issues: current.issues.map((item) => item.id === issue.id
-        ? { ...item, bbox, locationConfidence: 1, locationConfirmed: true, locationPinned: pinned } : item) } : current);
+        ? { ...item, bbox, locationConfidence: 1, locationConfirmed: true, locationPinned: pinned,
+          locationUnresolved: false } : item) } : current);
   }
 
   function handleOverlayPointerDown(event: PointerEvent<SVGRectElement>, issue: ReviewItem, mode: "move" | "resize") {
@@ -1011,8 +1014,10 @@ export default function Home() {
 
   async function reReviewIssue(issue: ReviewItem) {
     if (!imageUrl || isReviewing) return;
-    if (issue.kind === "strength") {
-      await handleReview();
+    if (issue.locationUnresolved) {
+      setActiveId(issue.id);
+      setPickingFeatureKey("");
+      setPickingIssueId(issue.id);
       return;
     }
     try {
@@ -1027,6 +1032,7 @@ export default function Home() {
   async function handleImagePositionClick(event: MouseEvent<SVGSVGElement>) {
     if (suppressOverlayClick.current) return;
     if ((!pickingIssueId && !pickingFeatureKey) || !review || !imageUrl) return;
+    event.stopPropagation();
     const rect = event.currentTarget.getBoundingClientRect();
     const px = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
     const py = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
@@ -1044,19 +1050,20 @@ export default function Home() {
     }
     const issue = review.issues.find((item) => item.id === pickingIssueId);
     if (!issue) return;
-    const w = Math.max(0.04, Math.min(0.25, issue.bbox.w));
-    const h = Math.max(0.04, Math.min(0.25, issue.bbox.h));
+    const w = issue.locationUnresolved ? 0.1 : Math.max(0.04, Math.min(0.25, issue.bbox.w));
+    const h = issue.locationUnresolved ? 0.1 : Math.max(0.04, Math.min(0.25, issue.bbox.h));
     const bbox = { x: Math.max(0, Math.min(1 - w, px - w / 2)), y: Math.max(0, Math.min(1 - h, py - h / 2)), w, h };
-    const corrected: ReviewItem = { ...issue, bbox, locationConfidence: 1, locationConfirmed: true, locationPinned: false };
-    const nextRegions = [...confirmedRegions.filter((region) => region.title !== issue.title),
-      { title: issue.title, featureTag: issue.featureTag, bbox, pinned: false }];
+    const corrected: ReviewItem = { ...issue, bbox, locationConfidence: 1, locationConfirmed: true,
+      locationPinned: false, locationUnresolved: false };
+    const nextRegions = [...confirmedRegions.filter((region) =>
+      region.issueId ? region.issueId !== issue.id : region.title !== issue.title),
+      { issueId: issue.id, title: issue.title, featureTag: issue.featureTag, bbox, pinned: false }];
     setConfirmedRegions(nextRegions);
     setReview((current) => current ? { ...current, scoreStale: true, overallScore: null,
       issues: current.issues.map((item) => item.id === issue.id ? { ...corrected, locationPinned: false } : item) } : current);
     setActiveId(issue.id);
     setPickingIssueId("");
-    if (issue.kind === "strength") await handleReview(observationOverrides, nextRegions);
-    else await reReviewIssue(corrected);
+    await reReviewIssue(corrected);
   }
 
   return (
@@ -1328,7 +1335,9 @@ export default function Home() {
                   <svg className={`overlay ${pickingIssueId || pickingFeatureKey ? "is-picking" : ""}`} viewBox="0 0 100 100" preserveAspectRatio="none"
                     onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}
                     onClick={(event) => void handleImagePositionClick(event)}>
+                    <rect x="0" y="0" width="100" height="100" fill="transparent" pointerEvents="all" />
                     {issues.map((issue, index) => {
+                      if (issue.locationUnresolved) return null;
                       const active = issue.id === activeId;
                       const cls =
                         issue.severity === "high"
@@ -1343,7 +1352,8 @@ export default function Home() {
                         <g
                           key={issue.id}
                           className={active ? "svg-active" : ""}
-                          onClick={() => setActiveId(issue.id)}
+                          pointerEvents={pickingIssueId || pickingFeatureKey ? "none" : undefined}
+                          onClick={() => { if (!pickingIssueId && !pickingFeatureKey) setActiveId(issue.id); }}
                         >
                           <title>{issue.title}{issue.locationPinned ? "，位置已固定" : "，可拖曳調整"}</title>
                           <rect
@@ -1557,17 +1567,17 @@ export default function Home() {
                     <p>{issue.description}</p>
                     <div className="confidence-row">
                       <span>判斷信心 {Math.round((issue.evidenceConfidence ?? issue.confidence) * 100)}%</span>
-                      <span>定位信心 {Math.round((issue.locationConfidence ?? 0.5) * 100)}%</span>
+                      <span>{issue.locationUnresolved ? "位置待確認" : `定位信心 ${Math.round((issue.locationConfidence ?? 0.5) * 100)}%`}</span>
                       {issue.locationConfirmed && <span>位置已由你確認</span>}
                       {issue.locationPinned && <span>📌 已固定</span>}
                     </div>
                     <div className="region-actions"><button className="secondary-action" type="button" onClick={(event) => {
-                        event.stopPropagation(); setActiveId(issue.id); setPickingIssueId(issue.id);
-                      }}>{!issue.locationConfirmed && (issue.locationConfidence ?? 0.5) < 0.7 ? "在圖面確認位置" : "更正圖面位置"}</button>
+                        event.stopPropagation(); setActiveId(issue.id); setPickingFeatureKey(""); setPickingIssueId(issue.id);
+                      }}>{issue.locationUnresolved ? "在圖面指定位置" : !issue.locationConfirmed && (issue.locationConfidence ?? 0.5) < 0.7 ? "在圖面確認位置" : "更正圖面位置"}</button>
                       <button className="secondary-action" type="button" disabled={isReviewing || supplement?.status === "reviewing"} onClick={(event) => {
                         event.stopPropagation(); void reReviewIssue(issue);
                       }}>重審此處</button>
-                      <button className="secondary-action" type="button" onClick={(event) => {
+                      <button className="secondary-action" type="button" disabled={issue.locationUnresolved} onClick={(event) => {
                         event.stopPropagation(); saveIssueRegion(issue, issue.bbox, !issue.locationPinned);
                       }}>{issue.locationPinned ? "解除圖釘" : "圖釘固定"}</button>
                       <button className="secondary-action discussion-trigger" type="button"
@@ -1614,7 +1624,7 @@ export default function Home() {
                       {discussionErrors[issue.id] && <p className="error-text" role="alert">{discussionErrors[issue.id]}</p>}
                     </section>}
 
-                    {issue.kind === "clarity_request" && issue.cropRequest ? (
+                    {(issue.kind === "clarity_request" || issue.locationUnresolved) && issue.cropRequest ? (
                       <div className="crop-request">
                         <strong>為什麼需要補圖</strong>
                         <p>{issue.cropRequest.reason}</p>
@@ -1690,7 +1700,7 @@ export default function Home() {
                         <button
                           className="suggestion-generate-button"
                           type="button"
-                          disabled={graphic?.status === "generating" || !isLocalModelReady ||
+                          disabled={graphic?.status === "generating" || !isLocalModelReady || issue.locationUnresolved ||
                             (!issue.locationConfirmed && (issue.locationConfidence ?? 0.5) < 0.7)}
                           onClick={() => void handleGenerateSuggestion(issue)}
                         >
@@ -1706,7 +1716,7 @@ export default function Home() {
                             <button
                             className="suggestion-generate-button ai-suggestion-button"
                             type="button"
-                            disabled={aiGraphic?.status === "generating"}
+                            disabled={aiGraphic?.status === "generating" || issue.locationUnresolved}
                             onClick={() => void handleGenerateAiSuggestion(issue)}
                           >
                             {aiGraphic?.status === "generating"
@@ -1718,7 +1728,7 @@ export default function Home() {
                           </details>
                         )}
                         <p className="suggestion-graphic-note">
-                          {(!issue.locationConfirmed && (issue.locationConfidence ?? 0.5) < 0.7)
+                          {(issue.locationUnresolved || !issue.locationConfirmed && (issue.locationConfidence ?? 0.5) < 0.7)
                             ? "請先在圖面確認位置，再生成修改圖。"
                             : "按下後讀取這個局部圖。能精準定位時產生 SVG；複雜圖形會改用已連線的圖片編修模型。"}
                         </p>

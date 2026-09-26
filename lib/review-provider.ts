@@ -23,7 +23,7 @@ import {
   extractText,
   parseJsonContent,
   normalizeReview,
-  normalizeItem,
+  normalizeSupplementResponse,
   readImageDimensions
 } from "@/lib/ai-proxy-client";
 import {
@@ -274,8 +274,8 @@ export class CliProxyReviewProvider implements ReviewProvider {
     );
     const systemPrompt = [
       "你是建築圖面局部補圖審查員。只重審原問題，不評整張圖。先核對文字與幾何證據，原辨識結論可推翻。",
-      "如果無法確認，status=still_uncertain、issue.kind=clarity_request；可以確認則 status=resolved。只有圖面及檢索知識均支持時才給缺失。",
-      "issue 需含 evidence、criterion、sourceRefs、featureTag、bbox 與一般 ReviewItem 欄位；bbox 以局部圖左上(0,0)、右下(1,1)標示。只回傳 {status,issue} JSON。",
+      "如果無法確認，status=still_uncertain；可以確認缺失或原問題是誤判，status=resolved，後者 issue.kind=strength。只有圖面及檢索知識均支持時才給缺失。",
+      "只回傳 {status,issue} JSON。issue 需含 kind、title、description、suggestion、evidence、criterion、sourceRefs、featureTag。位置沿用原圖已確認的範圍，不需輸出 bbox。",
       intensityInstruction,
       `僅引用以下已檢索知識：\n${knowledgePrompt(knowledge)}`
     ].join("\n");
@@ -301,7 +301,7 @@ export class CliProxyReviewProvider implements ReviewProvider {
                 {
                   type: "text",
                   text:
-                    "這是針對原問題的高解析局部補圖。不要重新評論整張圖。請輸出 JSON：{\"status\":\"resolved\"或\"still_uncertain\",\"issue\":完整 ReviewItem}。原問題 context：" +
+                    "這是針對原問題的高解析局部補圖。不要重新評論整張圖。請輸出 JSON：{\"status\":\"resolved\"或\"still_uncertain\",\"issue\":{\"kind\":\"issue|strength|clarity_request\",\"evidence\":\"\",\"criterion\":\"\",\"sourceRefs\":[]}}。可省略未改變的原問題欄位。原問題 context：" +
                     JSON.stringify(input.originalIssue)
                 },
                 { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
@@ -325,25 +325,8 @@ export class CliProxyReviewProvider implements ReviewProvider {
       }
 
       const payload = await response.json();
-      const parsed = parseJsonContent(extractText(payload)) as Record<string, unknown>;
-      const status = parsed.status === "resolved" ? "resolved" : "still_uncertain";
-      const updated = normalizeItem(parsed.issue, 0, imageDimensions);
-      const allowedIds = new Set(knowledge.map((unit) => unit.id));
-      const sourceRefs = (updated.sourceRefs || []).filter((id) => allowedIds.has(id));
-      const grounded = !!updated.evidence?.trim() && !!updated.criterion?.trim() && sourceRefs.length > 0;
-      const finalStatus = status === "resolved" && grounded ? "resolved" : "still_uncertain";
-
-      return {
-        status: finalStatus,
-        issue: {
-          ...updated,
-          id: input.originalIssue.id,
-          bbox: input.originalIssue.bbox,
-          sourceRefs,
-          kind: finalStatus === "resolved" ? "issue" : "clarity_request",
-          cropRequest: finalStatus === "resolved" ? undefined : updated.cropRequest || input.originalIssue.cropRequest
-        }
-      };
+      return normalizeSupplementResponse(parseJsonContent(extractText(payload)), input.originalIssue,
+        new Set(knowledge.map((unit) => unit.id)), imageDimensions);
     } finally {
       clearTimeout(timeoutId);
     }

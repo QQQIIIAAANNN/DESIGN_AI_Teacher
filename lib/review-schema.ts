@@ -89,6 +89,7 @@ export type ReviewItem = {
   locationConfidence?: number;
   locationConfirmed?: boolean;
   locationPinned?: boolean;
+  locationUnresolved?: boolean;
   visibilityStatus: VisibilityStatus;
   description: string;
   suggestion: string;
@@ -114,6 +115,7 @@ export type ReviewDimension = {
 };
 
 export type ConfirmedRegion = {
+  issueId?: string;
   title: string;
   featureTag?: CriticalFeature;
   bbox: NormalizedBBox;

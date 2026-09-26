@@ -181,7 +181,10 @@ export async function readImageDimensions(file: File): Promise<ImageDimensions |
 
 function numericCoordinate(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value.trim().replace(/%$/, ""));
+    if (Number.isFinite(numeric)) return numeric;
+  }
   return undefined;
 }
 
@@ -191,12 +194,14 @@ function normalizeBbox(value: unknown, imageDimensions?: ImageDimensions): Norma
   }
   if (!isRecord(value)) throw new Error("AI 回覆缺少有效的區域定位。");
 
-  const xValue = value.x ?? value.left ?? value.x1;
-  const yValue = value.y ?? value.top ?? value.y1;
+  const xValue = value.x ?? value.left ?? value.x1 ?? value.x_min;
+  const yValue = value.y ?? value.top ?? value.y1 ?? value.y_min;
   const widthValue = value.w ?? value.width;
   const heightValue = value.h ?? value.height;
-  const rightValue = value.x2 ?? value.right;
-  const bottomValue = value.y2 ?? value.bottom;
+  const rightValue = value.x2 ?? value.right ?? value.x_max;
+  const bottomValue = value.y2 ?? value.bottom ?? value.y_max;
+  const percentSpecified = [xValue, yValue, widthValue, heightValue, rightValue, bottomValue]
+    .some((coordinate) => typeof coordinate === "string" && coordinate.trim().endsWith("%"));
   let x = numericCoordinate(xValue);
   let y = numericCoordinate(yValue);
   const explicitWidth = numericCoordinate(widthValue);
@@ -214,7 +219,7 @@ function normalizeBbox(value: unknown, imageDimensions?: ImageDimensions): Norma
     y = Math.min(y, bottom);
   }
 
-  if (x === undefined || y === undefined || w === undefined || h === undefined || w < 0 || h < 0) {
+  if (x === undefined || y === undefined || w === undefined || h === undefined || w <= 0 || h <= 0) {
     throw new Error("AI 回覆缺少有效的區域定位。");
   }
 
@@ -222,9 +227,12 @@ function normalizeBbox(value: unknown, imageDimensions?: ImageDimensions): Norma
   let scaleY = 1;
   const coordinates = [x, y, w, h];
   const maxCoordinate = Math.max(...coordinates);
-  if (coordinates.every((coordinate) => coordinate >= -0.25 && coordinate <= 1.25)) {
+  if (percentSpecified && coordinates.every((coordinate) => coordinate >= 0 && coordinate <= 100)) {
+    scaleX = 100;
+    scaleY = 100;
+  } else if (coordinates.every((coordinate) => coordinate >= -0.25 && coordinate <= 1.25)) {
     // Normalized coordinates; modest model drift beyond an image edge is clipped below.
-  } else if (coordinates.every((coordinate) => coordinate >= 0 && coordinate <= 100)) {
+  } else if (maxCoordinate >= 3 && coordinates.every((coordinate) => coordinate >= 0 && coordinate <= 100)) {
     // Some vision models return percentages despite the normalized-coordinate request.
     scaleX = 100;
     scaleY = 100;
@@ -241,7 +249,7 @@ function normalizeBbox(value: unknown, imageDimensions?: ImageDimensions): Norma
     } else {
       throw new Error("AI 回覆的區域定位格式無法對應到圖面，請重新審圖。");
     }
-  } else if (coordinates.every((coordinate) => coordinate >= 0 && coordinate <= 1000)) {
+  } else if (maxCoordinate > 100 && coordinates.every((coordinate) => coordinate >= 0 && coordinate <= 1000)) {
     // Support the common 0–1000 image-coordinate convention when dimensions are unavailable.
     scaleX = 1000;
     scaleY = 1000;
@@ -249,6 +257,9 @@ function normalizeBbox(value: unknown, imageDimensions?: ImageDimensions): Norma
     throw new Error("AI 回覆的區域定位格式無法對應到圖面，請重新審圖。");
   }
 
+  if (x / scaleX >= 1 || y / scaleY >= 1 || (x + w) / scaleX <= 0 || (y + h) / scaleY <= 0) {
+    throw new Error("AI 回覆的區域定位不在圖面內。");
+  }
   const left = Math.max(0, Math.min(0.995, x / scaleX));
   const top = Math.max(0, Math.min(0.995, y / scaleY));
   const rightEdge = Math.max(left + 0.005, Math.min(1, (x + w) / scaleX));
@@ -300,7 +311,20 @@ function normalizeRedline(value: unknown, imageDimensions?: ImageDimensions): Re
 export function normalizeItem(value: unknown, index: number, imageDimensions?: ImageDimensions): ReviewItem {
   if (!isRecord(value)) throw new Error("AI 回覆的問題格式不正確。");
   const kind = value.kind === "clarity_request" ? "clarity_request" : value.kind === "issue" ? "issue" : value.kind === "strength" ? "strength" : null;
-  if (!kind) throw new Error("AI 回覆缺少問題類型。");
+  const rawBox = value.bbox ?? value.box ?? value.region ?? value.coordinates;
+  const rawCoordinates = Array.isArray(rawBox) ? rawBox : isRecord(rawBox) ? Object.values(rawBox) : [];
+  const inferredScale = rawCoordinates.some((coordinate) =>
+    (typeof coordinate === "string" && coordinate.trim().endsWith("%")) ||
+    (numericCoordinate(coordinate) ?? 0) > 1.25);
+  let bbox: NormalizedBBox;
+  let locationUnresolved = false;
+  try {
+    bbox = normalizeBbox(rawBox, imageDimensions);
+  } catch {
+    // Keep the finding visible as a card, without drawing a false box on the image.
+    bbox = { x: 0, y: 0, w: 1, h: 1 };
+    locationUnresolved = true;
+  }
   const severity: ReviewSeverity =
     value.severity === "high" || value.severity === "medium" || value.severity === "low" || value.severity === "info"
       ? value.severity
@@ -323,21 +347,25 @@ export function normalizeItem(value: unknown, index: number, imageDimensions?: I
           : []
       }
     : undefined;
+  const reportedLocationConfidence = boundedNumber(value.locationConfidence, 0, 1)
+    ? value.locationConfidence as number : 0.5;
 
   return {
     id: "ai-issue-" + (index + 1) + "-" + crypto.randomUUID(),
-    kind,
+    kind: kind ?? "clarity_request",
     title: typeof value.title === "string" ? value.title.slice(0, 160) : "需要確認的空間問題",
     category: typeof value.category === "string" ? value.category.slice(0, 80) : "空間配置",
-    severity,
-    scoreImpact: kind !== "strength" && typeof value.scoreImpact === "number" && Number.isFinite(value.scoreImpact)
+    severity: kind ? severity : "info",
+    scoreImpact: kind === "issue" && !locationUnresolved && typeof value.scoreImpact === "number" && Number.isFinite(value.scoreImpact)
       ? Math.max(-20, Math.min(0, value.scoreImpact))
       : null,
     confidence: boundedNumber(value.confidence, 0, 1) ? value.confidence as number : 0.5,
     evidenceConfidence: boundedNumber(value.evidenceConfidence, 0, 1) ? value.evidenceConfidence as number
       : boundedNumber(value.confidence, 0, 1) ? value.confidence as number : 0.5,
-    locationConfidence: boundedNumber(value.locationConfidence, 0, 1) ? value.locationConfidence as number : 0.5,
+    locationConfidence: locationUnresolved ? 0 : inferredScale
+      ? Math.min(reportedLocationConfidence, 0.6) : reportedLocationConfidence,
     locationConfirmed: false,
+    locationUnresolved,
     visibilityStatus,
     description: typeof value.description === "string" ? value.description.slice(0, 1400) : "",
     suggestion: typeof value.suggestion === "string" ? value.suggestion.slice(0, 1400) : "",
@@ -348,13 +376,57 @@ export function normalizeItem(value: unknown, index: number, imageDimensions?: I
       : [],
     featureTag: (["north_arrow", "main_entrance", "basement_ramp", "outdoor_stair", "none"] as CriticalFeature[])
       .includes(value.featureTag as CriticalFeature) ? value.featureTag as CriticalFeature : "none",
-    bbox: normalizeBbox(value.bbox, imageDimensions),
+    bbox,
     redline: normalizeRedline(value.redline, imageDimensions),
-    cropRequest: kind === "clarity_request" ? cropRequest ?? {
-      reason: "局部資訊不足，請提供更清楚的原圖或近拍。",
-      instructions: ["保留問題區域周邊約 10% 至 20% 的上下文。"],
+    cropRequest: kind === "clarity_request" || kind === null || locationUnresolved ? cropRequest ?? {
+      reason: locationUnresolved ? "模型未能在原圖提供有效落點，請先在圖面指定位置。" : "局部資訊不足，請提供更清楚的原圖或近拍。",
+      instructions: locationUnresolved ? ["點選圖面中的正確位置後重審。"] : ["保留問題區域周邊約 10% 至 20% 的上下文。"],
       reviewTargets: ["確認該處的空間與動線關係"]
     } : undefined
+  };
+}
+
+export function normalizeSupplementResponse(
+  value: unknown,
+  originalIssue: ReviewItem,
+  allowedIds: Set<string>,
+  imageDimensions?: ImageDimensions
+): SupplementReviewResult {
+  if (!isRecord(value)) throw new Error("局部審圖的回覆格式不正確。");
+  const responseIssue = isRecord(value.issue) ? value.issue : {};
+  const proposedKind = responseIssue.kind === "strength" || responseIssue.kind === "issue" ||
+    responseIssue.kind === "clarity_request" ? responseIssue.kind
+      : originalIssue.kind === "strength" ? "strength" : "issue";
+  // The crop uses its own coordinates. The original image position is retained independently.
+  const updated = normalizeItem({ ...originalIssue, ...responseIssue, kind: proposedKind,
+    bbox: originalIssue.bbox }, 0, imageDimensions);
+  const sourceRefs = Array.isArray(responseIssue.sourceRefs)
+    ? responseIssue.sourceRefs.filter((id): id is string => typeof id === "string" && allowedIds.has(id)).slice(0, 6)
+    : [];
+  const freshEvidence = typeof responseIssue.evidence === "string" && !!responseIssue.evidence.trim() &&
+    typeof responseIssue.criterion === "string" && !!responseIssue.criterion.trim() && sourceRefs.length > 0;
+  const status = value.status === "resolved" && proposedKind !== "clarity_request" && freshEvidence
+    ? "resolved" : "still_uncertain";
+  return {
+    status,
+    issue: {
+      ...updated,
+      id: originalIssue.id,
+      bbox: originalIssue.bbox,
+      locationConfidence: originalIssue.locationConfidence,
+      locationConfirmed: originalIssue.locationConfirmed,
+      locationPinned: originalIssue.locationPinned,
+      locationUnresolved: originalIssue.locationUnresolved,
+      sourceRefs: sourceRefs.length ? sourceRefs : (originalIssue.sourceRefs || []).filter((id) => allowedIds.has(id)),
+      kind: status === "resolved" ? proposedKind : "clarity_request",
+      severity: status === "resolved" ? updated.severity : "info",
+      scoreImpact: status === "resolved" && proposedKind === "issue" ? updated.scoreImpact : null,
+      cropRequest: status === "resolved" ? undefined : updated.cropRequest || originalIssue.cropRequest || {
+        reason: "局部圖仍不足以確認原意見。",
+        instructions: ["提供含問題位置、鄰近空間與標註的清晰局部圖。"],
+        reviewTargets: [originalIssue.title]
+      }
+    }
   };
 }
 
@@ -366,7 +438,8 @@ export function normalizeReview(
   if (!isRecord(value) || !Array.isArray(value.issues) || !Array.isArray(value.dimensions)) {
     throw new Error("AI 回覆不符合審圖資料格式，請重新審圖。");
   }
-  const issues = value.issues.slice(0, 40).map((issue, index) => normalizeItem(issue, index, imageDimensions));
+  const issues = value.issues.slice(0, 40).flatMap((issue, index) =>
+    isRecord(issue) ? [normalizeItem(issue, index, imageDimensions)] : []);
   const dimensions = value.dimensions.slice(0, 8).flatMap((dimension, index) => {
     if (!isRecord(dimension)) return [];
     const score = dimension.score;
@@ -413,7 +486,7 @@ export function normalizeReview(
     dimensions,
     issues,
     coverage,
-    needsSupplement: issues.some((issue) => issue.kind === "clarity_request")
+    needsSupplement: issues.some((issue) => issue.kind === "clarity_request" || issue.locationUnresolved)
   };
 }
 
@@ -571,14 +644,14 @@ export async function reviewSupplementWithAi(
     action: "chat",
     model: (process.env.NEXT_PUBLIC_REVIEW_MODEL || "").trim(),
     messages: [
-      { role: "system", content: `你是建築圖面局部補圖審查員。只重審原問題，先核對文字及幾何證據。回傳 {status,issue} JSON；issue 需包含 evidence、criterion、sourceRefs。僅引用以下知識：${JSON.stringify(knowledge)}` },
+      { role: "system", content: `你是建築圖面局部補圖審查員。只重審原問題，先核對文字及幾何證據。若原問題為誤判，status=resolved、issue.kind=strength；不能確認則 status=still_uncertain。回傳 {status,issue} JSON；issue 需包含 kind、evidence、criterion、sourceRefs。原圖位置由平台保留，不需輸出 bbox。僅引用以下知識：${JSON.stringify(knowledge)}` },
       {
         role: "user",
         content: [
           {
             type: "text",
             text:
-              "這是針對原問題的高解析補圖。不要重新評論整張圖。請輸出 JSON：{\"status\":\"resolved\"或\"still_uncertain\",\"issue\":完整 ReviewItem}。原問題 context：" +
+              "這是針對原問題的高解析補圖。不要重新評論整張圖。請輸出 JSON：{\"status\":\"resolved\"或\"still_uncertain\",\"issue\":{\"kind\":\"issue|strength|clarity_request\",\"evidence\":\"\",\"criterion\":\"\",\"sourceRefs\":[]}}。可省略未改變的原問題欄位。原問題 context：" +
               JSON.stringify(issue)
           },
           { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
@@ -586,27 +659,8 @@ export async function reviewSupplementWithAi(
       }
     ]
   });
-  const payload = parseJsonContent(extractText(response));
-  if (!isRecord(payload) || !isRecord(payload.issue)) {
-    throw new Error("局部審圖的回覆格式不正確。");
-  }
-  const status = payload.status === "resolved" ? "resolved" : "still_uncertain";
-  const updated = normalizeItem(payload.issue, 0, imageDimensions);
-  const allowedIds = new Set(knowledge.map((unit) => unit.id));
-  const sourceRefs = (updated.sourceRefs || []).filter((id) => allowedIds.has(id));
-  const finalStatus = status === "resolved" && !!updated.evidence?.trim() && !!updated.criterion?.trim() && sourceRefs.length > 0
-    ? "resolved" : "still_uncertain";
-  return {
-    status: finalStatus,
-    issue: {
-      ...updated,
-      id: issue.id,
-      bbox: issue.bbox,
-      sourceRefs,
-      kind: finalStatus === "resolved" ? "issue" : "clarity_request",
-      cropRequest: finalStatus === "resolved" ? undefined : updated.cropRequest || issue.cropRequest
-    }
-  };
+  return normalizeSupplementResponse(parseJsonContent(extractText(response)), issue,
+    new Set(knowledge.map((unit) => unit.id)), imageDimensions);
 }
 
 export function cropIssueImage(imageUrl: string, bbox: NormalizedBBox) {

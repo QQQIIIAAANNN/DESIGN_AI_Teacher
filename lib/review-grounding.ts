@@ -12,7 +12,8 @@ export function normalizeConfirmedRegions(value: unknown): ConfirmedRegion[] {
     const [x, y, w, h] = values as number[];
     if (w <= 0 || h <= 0 || x + w > 1.001 || y + h > 1.001) return [];
     const tags: CriticalFeature[] = ["north_arrow", "main_entrance", "basement_ramp", "outdoor_stair", "none"];
-    return [{ title: row.title.trim().slice(0, 160), bbox: { x, y, w, h }, pinned: row.pinned === true,
+    return [{ issueId: typeof row.issueId === "string" ? row.issueId.slice(0, 160) : undefined,
+      title: row.title.trim().slice(0, 160), bbox: { x, y, w, h }, pinned: row.pinned === true,
       featureTag: tags.includes(row.featureTag as CriticalFeature) ? row.featureTag as CriticalFeature : "none" }];
   });
 }
@@ -45,19 +46,21 @@ export function groundReview(review: DrawingReview, observations: ReviewObservat
     const featureTag = inferredFeature(issue);
     const observation = featureTag !== "none" ? observations.checks[featureTag] : null;
     const unverifiedFeature = observation !== null && observation.status !== "verified";
-    const confirmedRegion = confirmedRegions.find((region) =>
-      (featureTag !== "none" && region.featureTag === featureTag) || region.title.trim() === issue.title.trim());
-    const confirmedBox = observation?.confirmedByUser && observation.bbox ? observation.bbox : confirmedRegion?.bbox;
+    const confirmedRegion = confirmedRegions.find((region) => region.issueId === issue.id) ||
+      confirmedRegions.find((region) => region.title.trim() === issue.title.trim() &&
+        (!region.issueId || !review.issues.some((other) => other.id === region.issueId)));
+    const confirmedBox = confirmedRegion?.bbox || (observation?.confirmedByUser ? observation.bbox : undefined);
     const unsupported = !sourceRefs.length || !issue.evidence?.trim() || !issue.criterion?.trim()
       || (issue.evidenceConfidence ?? issue.confidence) < 0.55;
     if (issue.kind === "issue" && (unverifiedFeature || unsupported)) {
-      return { ...issue, featureTag, sourceRefs, ...(confirmedBox ? { bbox: confirmedBox, locationConfidence: 1, locationConfirmed: true, locationPinned: confirmedRegion?.pinned } : {}), kind: "clarity_request" as const, severity: "info" as const,
+      return { ...issue, featureTag, sourceRefs, ...(confirmedBox ? { bbox: confirmedBox, locationConfidence: 1, locationConfirmed: true, locationPinned: confirmedRegion?.pinned, locationUnresolved: false } : {}), kind: "clarity_request" as const, severity: "info" as const,
         scoreImpact: null, description: `${issue.description}（圖面證據或知識依據尚不足，暫不認定缺失。）`,
         cropRequest: { reason: unverifiedFeature ? "此要素在前置辨識中尚未確認。" : "缺少可核對的圖面證據或審查依據。",
           instructions: ["提供含文字、標高與周邊動線的清晰局部圖。"], reviewTargets: [issue.title] } };
     }
     return { ...issue, featureTag, sourceRefs,
-      ...(confirmedBox ? { bbox: confirmedBox, locationConfidence: 1, locationConfirmed: true, locationPinned: confirmedRegion?.pinned } : {}) };
+      ...(confirmedBox ? { bbox: confirmedBox, locationConfidence: 1, locationConfirmed: true, locationPinned: confirmedRegion?.pinned, locationUnresolved: false } : {}) };
   });
-  return { ...review, dimensions, coverage, issues, needsSupplement: issues.some((issue) => issue.kind === "clarity_request") };
+  return { ...review, dimensions, coverage, issues,
+    needsSupplement: issues.some((issue) => issue.kind === "clarity_request" || issue.locationUnresolved) };
 }

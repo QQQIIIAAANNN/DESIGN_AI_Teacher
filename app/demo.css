@@ -1913,6 +1913,9 @@ html, body { background: var(--canvas); color: var(--ink); font-family: -apple-s
 .advanced-image-action summary { cursor: pointer; }
 .advanced-image-action button { margin-top: 8px; }
 .overlay.is-picking { cursor: crosshair; }
+.overlay.is-picking > g { pointer-events: none; opacity: .18; }
+.overlay.is-picking > g.svg-active { opacity: 1; }
+.overlay.is-picking > rect:first-child { cursor: crosshair; }
 .location-pick-hint { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; padding: 11px 13px; border-radius: 11px; background: #eaf2ff; color: #245193; font-size: 12px; }
 .location-pick-hint button { border: 0; background: transparent; color: #1f5fbf; font-weight: 700; cursor: pointer; }
 .score-summary { margin-top: 20px; }
