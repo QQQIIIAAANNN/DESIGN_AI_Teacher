@@ -2,7 +2,7 @@
 
 ## 目前狀態
 
-這個分支已加入 Supabase migration、審圖紀錄 / SVG 問題保存，以及 Supabase Edge Function 到 CLIProxyAPI 的 AI 代理程式。題目區目前改採專案內 `data/question-bank.ts` 的靜態索引，內建民國 90–114 年建築設計、敷地計畫與公務人員高考三級題目與官方 PDF 連結；自訂 PDF 只在目前瀏覽器暫存，不需要 Supabase 才能使用。GitHub Pages 仍是公開的靜態前端；沒有 Supabase 專案設定時，審圖維持 Mock，不會嘗試連線。
+這個分支包含兩種部署路徑：Windows 本機 Next.js 可透過 CLIProxyAPI OAuth 使用已連接帳號的模型；GitHub Pages 是靜態前端，無法執行本機 `/api/review`，因此不提供這條本機額度路徑。另有 Supabase migration、審圖紀錄 / SVG 問題保存，以及 Supabase Edge Function 到 CLIProxyAPI 的伺服器端代理部署方式。題目區使用專案內 `data/question-bank.ts` 靜態索引與官方 PDF 連結；自訂 PDF 只在目前瀏覽器暫存。
 
 尚未提供 Supabase 專案，也尚未部署 Edge Function 或設定 CLIProxyAPI 主機，所以目前不是已連線的正式服務。不要把 service-role / secret key、CLIProxyAPI API key、CLIProxyAPI auth-dir、Codex / Antigravity 憑證放入 GitHub Pages、NEXT_PUBLIC 變數或程式碼。
 
@@ -53,13 +53,13 @@ Edge Function 僅接受已登入且 membership_status 為 active 的帳號、明
 
 ## 圖面與建議圖的資料處理
 
-Mock 模式不會傳送圖面。正式 AI 審圖只有在使用者勾選同意並按下審圖後，才會將完整圖面經 Supabase Edge Function 傳到 CLIProxyAPI 與其設定的上游模型。審圖完成後，結構化結果會保存到該帳號的 `review_sessions` / `review_findings`，包含 SVG bbox、紅線與補圖要求；RLS 不允許其他帳號讀取。單項 AI 建議圖只傳送 SVG 問題框周邊裁圖與該項文字，不會覆寫原圖；若模型回傳 PNG，平台會把它放進私有 `suggestion-images` bucket 並以短時效 signed URL 預覽；若模型只回傳遠端 URL，則不會替它複製或公開保存。使用前應確認上游模型的資料處理、費用、使用條款以及你是否有權上傳該圖面。
+GitHub Pages 的 Mock 展示不會傳送圖面。Supabase 正式審圖只有在使用者勾選同意並按下審圖後，才會將完整圖面經 Supabase Edge Function 傳到 CLIProxyAPI 與其設定的上游模型；本機 Next.js 則經本機 `/api/review` 呼叫 CLIProxyAPI。審圖完成後，Supabase 路徑的結構化結果會保存到該帳號的 `review_sessions` / `review_findings`，包含 SVG bbox、紅線與補圖要求；RLS 不允許其他帳號讀取。單項 AI 建議圖只傳送 SVG 問題框周邊裁圖與該項文字，不會覆寫原圖；若模型回傳 PNG，平台會把它放進私有 `suggestion-images` bucket 並以短時效 signed URL 預覽；若模型只回傳遠端 URL，則不會替它複製或公開保存。使用前應確認上游模型的資料處理、費用、使用條款以及你是否有權上傳該圖面。
 
 題目 PDF 在資料庫中先以 draft 狀態保留，核對檔案授權與題目資料後再發布；不要把未獲授權的講義、評圖或題目設成已發布。
 
 ## CLIProxyAPI OAuth 登入
 
-Codex 與 Antigravity OAuth 由 CLIProxyAPI 原生管理中心或本機命令列完成；本站只提供設定按鈕、管理中心連結與登入指令複製，不呼叫 Management API，也不收集供應商 API key。請依 [CLIProxyAPI OAuth 登入設定](./cliproxyapi-oauth.md) 操作。
+Codex 與 Antigravity OAuth 由 CLIProxyAPI 原生管理中心或本機命令列完成；Windows 本機應用會從 CLIProxyAPI 動態讀取模型並透過 server-side `/api/review` 與 `/api/review/supplement` 呼叫。請依 [CLIProxyAPI OAuth 登入設定](./cliproxyapi-oauth.md) 與 [本機執行說明](./local-run.md) 操作。
 
 ## CLIProxyAPI 部署檢查
 
@@ -72,10 +72,10 @@ Migration 包含年度題目索引與私有 PDF 儲存、講師與案例來源�
 
 ## 本機優先運行（目前建議）
 
-公開 GitHub Pages 先保留作為介面與靜態 Mock；需要實際憑證與後端時，改在本機執行 `start-local.bat`。目前啟動器會：
+本機使用帳號額度時，雙擊根目錄的 `start.bat`。啟動器會：
 
 1. 啟動 Next.js 前端 `http://127.0.0.1:3000`。
-2. 若找到 CLIProxyAPI，啟動本機 `http://127.0.0.1:8317`。
+2. 若找到 CLIProxyAPI 執行檔，於背景啟動本機 `http://127.0.0.1:8317`。
 3. 由 CLIProxyAPI 原生管理中心或 `--codex-login`／`--antigravity-login` 完成 OAuth。
 
-OAuth 憑證只由 CLIProxyAPI 保存在自己的 `auth-dir`。完整本地審圖後端仍應放在 localhost 或受限內網，瀏覽器不直接接觸 auth-dir，也不要把 CLIProxyAPI Management API 公開到網際網路；本分支尚未把公開 Pages 自動切換成此本地後端。
+OAuth 憑證只由 CLIProxyAPI 保存在自己的 `auth-dir`。審圖 API key 僅由 Next.js 伺服器從 CLIProxyAPI 設定或 `.env.local` 讀取；瀏覽器不直接接觸憑證或 API key，也不要把 CLIProxyAPI Management API 公開到網際網路。

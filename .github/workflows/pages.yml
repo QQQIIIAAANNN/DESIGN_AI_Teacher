@@ -3,7 +3,7 @@ name: Deploy GitHub Pages demo
 on:
   push:
     branches:
-      - knowledge/k-tuhui-ingestion-20260921
+      - main
   workflow_dispatch:
 
 permissions:

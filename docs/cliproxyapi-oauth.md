@@ -1,6 +1,6 @@
 # CLIProxyAPI OAuth 登入設定
 
-本平台不直接呼叫 CLIProxyAPI Management API，也不要求在網站輸入管理密鑰或供應商 API key。OAuth 登入由 CLIProxyAPI 自己的本機管理中心或命令列完成，平台右上角的「CLIProxyAPI 設定」只提供入口與指令複製。
+OAuth 登入由 CLIProxyAPI 自己的本機管理中心或命令列完成，平台右上角的「CLIProxyAPI 設定」提供登入入口、連線狀態與模型清單。審圖請求由本機 Next.js 後端透過 CLIProxyAPI 的相容 API 傳送；CLIProxyAPI client API key 僅放在 `config.yaml` 的 `api-keys` 或伺服器端 `.env.local`，不會送到瀏覽器。
 
 ## 方式一：CLIProxyAPI 原生管理中心
 
@@ -29,9 +29,9 @@ http://127.0.0.1:8317/management.html
 ## 重要界線
 
 - 這裡使用的是 Codex / Antigravity OAuth，不是 `codex-api-key` 或其他另外計費的供應商 API key。
-- 網站只負責開啟 `/management.html` 與複製官方 CLI 指令，不會把 API key、管理密鑰或 OAuth token 放進 GitHub Pages。
+- 網站不會把 CLIProxyAPI API key、管理密鑰或 OAuth token 放進瀏覽器或 GitHub Pages。
 - `auth-dir` 應放在 CLIProxyAPI 主機的私有目錄，不能提交到 Git。
-- GitHub Pages 與 CLIProxyAPI 可分開運作；要讓正式 AI 審圖使用 CLIProxyAPI，仍需另外完成 Supabase Edge Function 的伺服器端模型設定。
+- `/v1/models` 的結果會成為目前模型選單；完整審圖與局部補圖精審都會使用選定的已發現模型。
 
 ## 官方文件
 
@@ -43,18 +43,18 @@ http://127.0.0.1:8317/management.html
 
 ## Windows 本機快速入口
 
-專案根目錄的 `start-local.bat` 會啟動本機 Next.js 前端；若 `CLIPROXY_BIN` 已指向 CLIProxyAPI 執行檔，也會另開視窗啟動 CLIProxyAPI：
+專案根目錄的 `start.bat` 會啟動本機 Next.js，並在背景啟動可找到的 CLIProxyAPI 執行檔：
 
 ```bat
-start-local.bat
+start.bat
 ```
 
 登入與管理中心可直接使用：
 
 ```bat
-start-local.bat codex-login
-start-local.bat antigravity-login
-start-local.bat management
+scripts\windows\start-local.bat codex-login
+scripts\windows\start-local.bat antigravity-login
+scripts\windows\start-local.bat management
 ```
 
 若執行檔不在 PATH，先設定：
@@ -63,4 +63,4 @@ start-local.bat management
 set CLIPROXY_BIN=C:\path\to\cli-proxy-api.exe
 ```
 
-這些入口只呼叫 CLIProxyAPI 的原生 OAuth 命令；不會把 OAuth token、auth-dir、管理密鑰或供應商 API key 傳到 GitHub Pages。
+這些入口呼叫 CLIProxyAPI 的原生 OAuth 命令；OAuth token 與 `auth-dir` 留在本機，API key 由後端讀取，不會送到瀏覽器。

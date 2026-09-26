@@ -5,3 +5,8 @@ out
 .env.local
 .DS_Store
 *.log
+auth-dir
+/config.yaml
+*.zip
+cli-proxy-api.exe
+/knowledge/private/

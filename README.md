@@ -6,11 +6,11 @@
 
 不是單純讓 AI 對圖面產生文字講評，而是把審圖結果轉成可操作的圖面層：
 
-1. 上傳完整作答圖。
-2. AI 依結構化 rubric 審圖。
-3. 回傳問題座標、嚴重度與 confidence。
+1. 選定官方題目或上傳題目 PDF，再上傳完整作答圖。
+2. 平台自動讀取題目需求與基地條件，辨識圖面後檢索相關知識要點。
+3. AI 依結構化 rubric 審圖，回傳問題與評分的證據信心及圖面定位信心。
 4. 用 SVG overlay 框選錯誤區域。
-5. 以結構化 SVG redline 顯示修改方向。
+5. 位置不確定時由使用者點選圖面確認；局部修改可產生 SVG 或圖片編修圖。
 6. 若局部圖面不足以可靠判讀，主動要求補上高解析局部圖。
 7. 補圖後針對同一區域重新精審，而不是硬猜。
 8. 後續累積個人歷次弱點與進步軌跡。
@@ -27,32 +27,30 @@
 - Clarity Gate / 需補圖狀態
 - 局部圖片補傳 UI
 - Responsive UI
-- GitHub Actions build CI\n- Server-side `/api/review` endpoint\n- 可替換的 Review Provider adapter
+- GitHub Actions 建置與 Pages 展示版
+- Server-side `/api/review` endpoint
+- 可替換的 Review Provider adapter
 
-目前前端已透過 `/api/review` 呼叫 server-side Review Provider。預設 provider 仍為 mock，目的是讓 UI、API contract、SVG grounding 與補圖精審先固定；之後只需要新增 provider adapter 即可接入真正的多模態模型。
+本機前端透過 `/api/review` 呼叫 server-side Review Provider，預設連接 CLIProxyAPI。服務會從已連線的 CLIProxyAPI `/v1/models` 動態取得模型，不預設過時型號；完成 OAuth 並有支援圖片輸入的模型後，即可使用該帳號額度進行整圖審查與局部補圖精審。離線示範需明確設定 `REVIEW_PROVIDER=mock`。
 
 ## AI Pipeline
 
 ```
-Upload
+Selected official PDF / uploaded question PDF
   ↓
-Image normalization
+Question and site context reading
+  ↓
+Drawing upload and image normalization
   ↓
 Global vision pass
   ↓
-Clarity gate
-  ├─ clear → rubric review
-  └─ unclear → clarity_request → supplemental crop → local re-review
+RAG over canonical platform knowledge and an optional private course index
   ↓
-RAG
-  ├─ teacher rubrics
-  ├─ reference cases
-  ├─ codes
-  └─ visual references
+Evidence-gated rubric review
+  ├─ clear → scored issue
+  └─ uncertain → location confirmation or supplemental crop → re-review
   ↓
-Structured review JSON
-  ↓
-SVG renderer
+SVG annotation / on-demand SVG or image edit
 ```
 
 ## 文件
@@ -108,9 +106,15 @@ npm install
 npm run dev
 ```
 
-打開 http://localhost:3000
+Windows 請雙擊根目錄的 `start.bat`；啟動器會準備依賴、背景啟動本機 CLIProxyAPI（若執行檔可用），並確認前端健康檢查通過後才開啟 http://127.0.0.1:3000。其他 Windows 輔助腳本集中在 `scripts/windows/`。CLIProxyAPI API key 請放在 `config.yaml` 的 `api-keys` 或 `.env.local` 的 `CLIPROXY_API_KEY`，不可放入 `NEXT_PUBLIC_*` 變數。
+
+私有 PDF、課程圖面與圖片的文字及視覺索引建立方式見 [docs/knowledge-indexing.md](docs/knowledge-indexing.md)。索引可供本機 CLI 審圖按主題檢索；原始教材與向量檔不進 Git。四種作圖情境、歷年案例生成練習題、計時、審圖工作檔匯入匯出與卡片討論方式見 [docs/practice-workflow.md](docs/practice-workflow.md)。
+
+AI 練習題可輸入特殊需求，並產生帶有指北、尺寸、道路與鄰地的基地示意圖；題目文字與 SVG 共用基地條件。審圖卡片討論會逐步顯示模型回覆。GitHub Pages 為不含後端的靜態展示版；OAuth、帳號額度審圖、AI 生題與串流討論需使用本機完整版本。
+
+自動閱讀題目 PDF 需要 Poppler 的 `pdftotext`、`pdfinfo`、`pdftoppm`。程式先找 `POPPLER_BIN_DIR` 指定的資料夾、專案內的 `tools/poppler/bin`、本機 Codex 隨附的 Poppler，再找系統 PATH。若都沒有，請安裝 Poppler 並設定 `POPPLER_BIN_DIR`；審圖畫面會顯示缺少工具的原因。
 
 
 ## Backend setup
 
-Supabase schema, optional private storage, invite-only sign-in, and the protected CLIProxyAPI Edge Function are documented in [docs/backend-setup.md](docs/backend-setup.md). The current question catalog is lightweight and project-local in [`data/question-bank.ts`](data/question-bank.ts); it links to official PDFs instead of redistributing unverified files. Codex / Antigravity OAuth setup is documented in [docs/cliproxyapi-oauth.md](docs/cliproxyapi-oauth.md). The app remains in local Mock mode until a Supabase project and server-side secrets are configured.
+Supabase schema、私有儲存與受保護的 CLIProxyAPI Edge Function 部署方式見 [docs/backend-setup.md](docs/backend-setup.md)。題庫索引位於 [`data/question-bank.ts`](data/question-bank.ts)，連結官方 PDF。Windows 本機 OAuth、啟動與審圖流程見 [docs/local-run.md](docs/local-run.md) 與 [docs/cliproxyapi-oauth.md](docs/cliproxyapi-oauth.md)。

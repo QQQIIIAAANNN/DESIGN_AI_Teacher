@@ -27,7 +27,8 @@ function readJsonl(rel) {
 const topicsTaxonomy = readJson("knowledge/taxonomies/topics.json");
 const knowledgeTypes = readJson("knowledge/taxonomies/knowledge-types.json");
 const sources = readJsonl("knowledge/manifests/sources.jsonl");
-const units = readJsonl("knowledge/manifests/knowledge_units.jsonl");
+const units = [...readJsonl("knowledge/manifests/knowledge_units.jsonl"),
+  ...readJsonl("knowledge/manifests/review_coverage_units.jsonl")];
 
 const allowedTopics = new Set(
   Object.values(topicsTaxonomy.topics).flat()

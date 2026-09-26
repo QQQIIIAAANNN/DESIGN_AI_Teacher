@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { ReviewItem } from "@/lib/review-schema";
 import { getReviewProvider } from "@/lib/review-provider";
+import { reviewAuthorizationError } from "@/lib/server-auth";
+import { isReviewScenarioId, normalizeReviewMinutes } from "@/lib/review-scenario";
 
 export const runtime = "nodejs";
 
@@ -8,6 +10,8 @@ const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 export async function POST(request: Request) {
   try {
+    const denied = await reviewAuthorizationError(request);
+    if (denied) return denied;
     const formData = await request.formData();
 
     const crop = formData.get("crop");
@@ -58,12 +62,21 @@ export async function POST(request: Request) {
       );
     }
 
+    const model = (formData.get("model") as string | null) || undefined;
+    const intensity = (formData.get("intensity") as "gentle" | "standard" | "strict" | null) || undefined;
+    const scenarioValue = formData.get("scenario");
+    const scenario = isReviewScenarioId(scenarioValue) ? scenarioValue : "design_8h";
+
     const provider = getReviewProvider();
     const result = await provider.reviewSupplement({
       file: crop,
       reviewId,
       drawingId,
-      originalIssue
+      originalIssue,
+      model,
+      intensity,
+      scenario,
+      targetMinutes: normalizeReviewMinutes(formData.get("targetMinutes"), scenario)
     });
 
     return NextResponse.json(result);
@@ -71,8 +84,8 @@ export async function POST(request: Request) {
     console.error("Supplement review API failed:", error);
 
     return NextResponse.json(
-      { error: "局部精審流程發生錯誤。" },
-      { status: 500 }
+      { error: error instanceof Error ? error.message : "局部精審流程發生錯誤。" },
+      { status: 502 }
     );
   }
 }

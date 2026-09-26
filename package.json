@@ -3,15 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 127.0.0.1",
     "build": "next build",
-    "start": "next start",
-    "validate:knowledge": "node scripts/validate-knowledge.mjs"
+    "start": "next start -H 127.0.0.1",
+    "validate:knowledge": "node scripts/validate-knowledge.mjs",
+    "audit:knowledge": "python scripts/audit-private-knowledge.py"
   },
   "dependencies": {
     "next": "^15.5.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

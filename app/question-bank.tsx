@@ -35,16 +35,18 @@ function formatFileSize(size: number) {
 
 
 export function QuestionSelector({
-  onSelect
+  onSelect,
+  initialQuestion
 }: {
-  onSelect: (question: ProjectQuestion) => void;
+  onSelect: (question: ProjectQuestion | null) => void;
+  initialQuestion?: ProjectQuestion | null;
 }) {
   const years = useMemo(
     () => Array.from({ length: 25 }, (_, index) => 114 - index),
     []
   );
-  const [year, setYear] = useState("114");
-  const [category, setCategory] = useState<QuestionCategory>("architectural_design");
+  const [year, setYear] = useState(initialQuestion ? String(initialQuestion.year) : "");
+  const [category, setCategory] = useState<QuestionCategory>(initialQuestion?.category || "architectural_design");
   const selected = useMemo(
     () =>
       questionBankCatalog.find(
@@ -54,7 +56,7 @@ export function QuestionSelector({
   );
 
   useEffect(() => {
-    if (selected) onSelect(selected);
+    onSelect(selected);
   }, [onSelect, selected]);
 
   return (
@@ -63,7 +65,7 @@ export function QuestionSelector({
         <div>
           <span className="step">02 · REVIEW TARGET</span>
           <h2 id="question-selector-title">選擇本次檢討題目</h2>
-          <p>先指定年份與題型，審圖時會以這一題作為練習脈絡。</p>
+          <p>選定題目後，審圖時會自動讀取官方 PDF 的需求、基地條件與附圖。</p>
         </div>
         <span className="qb-local-chip">90–114 年</span>
       </div>
@@ -72,6 +74,7 @@ export function QuestionSelector({
         <label className="qb-field">
           <span>題目年度</span>
           <select value={year} onChange={(event) => setYear(event.target.value)}>
+            <option value="">未指定題目</option>
             {years.map((item) => (
               <option key={item} value={String(item)}>{item} 年</option>
             ))}
@@ -105,7 +108,7 @@ export function QuestionSelector({
           </a>
         </div>
       ) : (
-        <p className="question-selector-empty">這個年份目前沒有該題型索引。</p>
+        <p className="question-selector-empty">也可在下方上傳自己的題目 PDF；未提供題目時，題意評分會標示為暫評。</p>
       )}
 
     </section>
