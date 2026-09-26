@@ -1,120 +1,65 @@
 # DESIGN_AI_Teacher
 
-建築師考試「建築設計 / 敷地繪圖」AI 輔助練習平台。
+建築設計與敷地考試的 AI 練習平台。它會先讀取題目和圖面，再用設計要點與基地證據提出審查意見，並把每項意見定位到作答圖上。
 
-## 產品核心
+[開啟 GitHub Pages 展示版](https://qqqiiiaaannn.github.io/DESIGN_AI_Teacher/) · [Windows 本機啟動說明](docs/local-run.md)
 
-不是單純讓 AI 對圖面產生文字講評，而是把審圖結果轉成可操作的圖面層：
+## 功能
 
-1. 選定官方題目或上傳題目 PDF，再上傳完整作答圖。
-2. 平台自動讀取題目需求與基地條件，辨識圖面後檢索相關知識要點。
-3. AI 依結構化 rubric 審圖，回傳問題與評分的證據信心及圖面定位信心。
-4. 用 SVG overlay 框選錯誤區域。
-5. 位置不確定時由使用者點選圖面確認；局部修改可產生 SVG 或圖片編修圖。
-6. 若局部圖面不足以可靠判讀，主動要求補上高解析局部圖。
-7. 補圖後針對同一區域重新精審，而不是硬猜。
-8. 後續累積個人歷次弱點與進步軌跡。
+- **依考試時數調整審查**：快速方案（2–3 小時）、敷地大圖（4 小時）、公務三級（6 小時）、完整設計大圖（8 小時）；可自行調整作圖時間。
+- **題目與基地判讀**：選擇歷年官方題目或上傳 PDF，讀取題目需求、基地條件及附圖。
+- **知識檢索與圖面審查**：按審查主題從平台準則及可用的私有教材索引檢索要點，再以證據評分和定位。位置信心偏低時可由使用者確認或重新審查。
+- **模擬題與考前練習**：參考同類歷年案例生成建築設計、敷地或三級練習題；可輸入特殊練習需求。生成的新題會附上基地條件圖，含指北、尺寸、道路、鄰地及指定基地要素。題目文字和 SVG 圖共用同一份基地資料，圖面可下載。
+- **卡片對話**：每項意見可展開討論，模型會重新檢視局部圖並串流顯示回覆；有圖面證據支持時才修正判讀。
+- **練習工具**：倒數計時、工作檔 JSON 匯入與匯出，以及圖面上的 SVG 定位與修改建議。
 
-## 目前 MVP v0.2
+## 使用版本
 
-- Next.js + TypeScript
-- JPG / PNG 圖面上傳
-- SVG 問題框選
-- SVG redline 示意
-- normalized coordinates
-- 結構化評分面板
-- 問題清單與修改建議
-- Clarity Gate / 需補圖狀態
-- 局部圖片補傳 UI
-- Responsive UI
-- GitHub Actions 建置與 Pages 展示版
-- Server-side `/api/review` endpoint
-- 可替換的 Review Provider adapter
+### GitHub Pages 展示版
 
-本機前端透過 `/api/review` 呼叫 server-side Review Provider，預設連接 CLIProxyAPI。服務會從已連線的 CLIProxyAPI `/v1/models` 動態取得模型，不預設過時型號；完成 OAuth 並有支援圖片輸入的模型後，即可使用該帳號額度進行整圖審查與局部補圖精審。離線示範需明確設定 `REVIEW_PROVIDER=mock`。
+Pages 提供靜態介面與操作展示。它不執行伺服器 API，因此不會連接本機 CLIProxyAPI，也不能使用 OAuth 帳號額度生題、審圖或討論。
 
-## AI Pipeline
+### 本機完整版
 
-```
-Selected official PDF / uploaded question PDF
-  ↓
-Question and site context reading
-  ↓
-Drawing upload and image normalization
-  ↓
-Global vision pass
-  ↓
-RAG over canonical platform knowledge and an optional private course index
-  ↓
-Evidence-gated rubric review
-  ├─ clear → scored issue
-  └─ uncertain → location confirmation or supplemental crop → re-review
-  ↓
-SVG annotation / on-demand SVG or image edit
-```
+本機 Next.js 後端連接 CLIProxyAPI。登入後，平台會從已連線的 CLIProxyAPI `/v1/models` 動態偵測模型，不會預設舊型號。請選擇支援圖片輸入的模型進行審圖。
 
-## 文件
+## Windows 快速開始
 
-- `docs/PRD-v0.2.md`：MVP 產品規格與驗證方法
-- `docs/review-schema.md`：Review JSON 與補圖資料結構
-- `lib/review-schema.ts`：前端共用 TypeScript types
+1. 安裝 Node.js 20 或更新版本。
+2. 將 CLIProxyAPI 執行檔放在專案根目錄或系統 `PATH`。
+3. 雙擊專案根目錄的 `start.bat`。首次執行會準備依賴；啟動器會等待前端和本機服務就緒後，再開啟 `http://127.0.0.1:3000`。
+4. 在頁面右上方完成 CLIProxyAPI OAuth，選取偵測到的模型後即可使用。
 
-## RAG 建議
+API key 可放在 CLIProxyAPI 的 `config.yaml`，或本機 `.env.local` 的 `CLIPROXY_API_KEY`。OAuth 憑證由 CLIProxyAPI 保存在自己的 `auth-dir`。這些憑證不可提交到 Git 或放入 `NEXT_PUBLIC_*` 環境變數。
 
-資料至少拆成：
-
-- `rubrics`：老師講義與評圖原則
-- `cases`：高分 / 低分案例及評論
-- `codes`：法規與無障礙規範
-- `visual_refs`：圖面案例與視覺 embedding
-
-不要一開始把所有 PDF、圖面、法規塞進同一個 collection。那不是知識庫，是 AI 廚餘桶。
-
-## MVP 驗證
-
-建議先準備 30～50 張已有真人老師批改結果的練習圖，評估：
-
-- 問題召回率
-- 問題精確率
-- SVG 定位準確度
-- 紅線修改有用程度
-- 補圖要求是否合理
-- 看不清楚卻硬判的比例
-
-最後一項應作為關鍵品質指標。
-
-## 商業化預留
-
-後續可加入：
-
-- account
-- practice_session
-- drawing
-- review
-- review_issue
-- supplemental_crop
-- usage_credit
-- payment_transaction
-- knowledge_source
-
-第一階段比起月訂閱，更適合測試「整張審圖 / 局部精審 / 紅線改圖」點數制。
-
-## 開發
+其他啟動、OAuth 與 PDF 設定方式見[本機執行說明](docs/local-run.md)及[CLIProxyAPI OAuth 說明](docs/cliproxyapi-oauth.md)。非 Windows 開發者可在專案目錄執行：
 
 ```bash
 npm install
 npm run dev
 ```
 
-Windows 請雙擊根目錄的 `start.bat`；啟動器會準備依賴、背景啟動本機 CLIProxyAPI（若執行檔可用），並確認前端健康檢查通過後才開啟 http://127.0.0.1:3000。其他 Windows 輔助腳本集中在 `scripts/windows/`。CLIProxyAPI API key 請放在 `config.yaml` 的 `api-keys` 或 `.env.local` 的 `CLIPROXY_API_KEY`，不可放入 `NEXT_PUBLIC_*` 變數。
+## 題目 PDF 與私有知識庫
 
-私有 PDF、課程圖面與圖片的文字及視覺索引建立方式見 [docs/knowledge-indexing.md](docs/knowledge-indexing.md)。索引可供本機 CLI 審圖按主題檢索；原始教材與向量檔不進 Git。四種作圖情境、歷年案例生成練習題、計時、審圖工作檔匯入匯出與卡片討論方式見 [docs/practice-workflow.md](docs/practice-workflow.md)。
+閱讀 PDF 需要 Poppler 的 `pdftotext`、`pdfinfo`、`pdftoppm`。程式會搜尋 `POPPLER_BIN_DIR`、專案內的 `tools/poppler/bin` 與系統 `PATH`。若尚未安裝，審圖畫面會顯示原因；選用官方題目或上傳 PDF 都需要這些工具。
 
-AI 練習題可輸入特殊需求，並產生帶有指北、尺寸、道路與鄰地的基地示意圖；題目文字與 SVG 共用基地條件。審圖卡片討論會逐步顯示模型回覆。GitHub Pages 為不含後端的靜態展示版；OAuth、帳號額度審圖、AI 生題與串流討論需使用本機完整版本。
+私有教材的文字、圖頁及圖片索引建立方式見[知識庫索引說明](docs/knowledge-indexing.md)。原始教材、OCR 補充及視覺向量應保留在受控的私有位置，不要提交到 Git。
 
-自動閱讀題目 PDF 需要 Poppler 的 `pdftotext`、`pdfinfo`、`pdftoppm`。程式先找 `POPPLER_BIN_DIR` 指定的資料夾、專案內的 `tools/poppler/bin`、本機 Codex 隨附的 Poppler，再找系統 PATH。若都沒有，請安裝 Poppler 並設定 `POPPLER_BIN_DIR`；審圖畫面會顯示缺少工具的原因。
+## 建置與部署
 
+```bash
+npm run build
+```
 
-## Backend setup
+推送到 `main` 會觸發 GitHub Actions 建置並部署 Pages 靜態展示版。完整 AI 功能需要可執行 Next.js API 的主機與安全保存的 CLIProxyAPI 憑證；Supabase 雲端路徑的設定見[後端部署說明](docs/backend-setup.md)。
 
-Supabase schema、私有儲存與受保護的 CLIProxyAPI Edge Function 部署方式見 [docs/backend-setup.md](docs/backend-setup.md)。題庫索引位於 [`data/question-bank.ts`](data/question-bank.ts)，連結官方 PDF。Windows 本機 OAuth、啟動與審圖流程見 [docs/local-run.md](docs/local-run.md) 與 [docs/cliproxyapi-oauth.md](docs/cliproxyapi-oauth.md)。
+審查結果與分數是練習輔助，不是官方評分或及格判定。AI 生成題與考前猜題是模擬練習，不代表官方預測。上傳的圖面與題目會送至目前連接的模型；卡片討論只傳送對應的局部圖。工作檔可能包含私人圖面，請存放在自己控制的位置。
+
+## 文件
+
+- [練習情境、生成題與工作檔](docs/practice-workflow.md)
+- [審查涵蓋要點](docs/spatial-review-criteria.md)
+- [知識庫索引建立與稽核](docs/knowledge-indexing.md)
+- [本機執行與 OAuth](docs/local-run.md)、[CLIProxyAPI OAuth](docs/cliproxyapi-oauth.md)
+- [Supabase 與雲端後端部署](docs/backend-setup.md)
+- [題庫索引與官方來源](data/question-bank.ts)
