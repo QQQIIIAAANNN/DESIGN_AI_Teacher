@@ -8,6 +8,30 @@ import re
 
 
 EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif"}
+EXCLUDED_PDF_NAMES = {
+    "敷地臨摹作業-2025-07-05.pdf", "K圖會2025建築設計模擬考題-設計博物館設計.pdf",
+    "K圖會-設計課模擬題目.pdf", "建築敷地考題2025第二次K圖會大評圖.pdf",
+    "105170_0106_建築計畫與設計(圖書館與社區公共空間).pdf",
+    "109年高考(設計)-城市未來生活體驗館設計.pdf", "098高考(設計)-休假與訓練中心.pdf",
+    "95年歷史建築保存再利用社區.pdf", "共享公寓企劃.pdf",
+}
+EXCLUDED_IMAGE_PATHS = {
+    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (1).jpg",
+    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (2).jpg",
+    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (3).jpg",
+    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (4).jpg",
+    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/110年專技(敷地)-某地方區政中心_頁面_1.jpg",
+    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/110年專技(敷地)-某地方區政中心_頁面_2.jpg",
+}
+
+
+def excluded_source(path: Path, root: Path) -> bool:
+    relative = path.relative_to(root)
+    if "知識索引" in relative.parts:
+        return True
+    if path.suffix.lower() == ".pdf" and path.name in EXCLUDED_PDF_NAMES:
+        return True
+    return path.suffix.lower() != ".pdf" and relative.as_posix() in EXCLUDED_IMAGE_PATHS
 SOURCE_ID = re.compile(r"^(?:PV|PT|IMG)-([a-f0-9]{20})(?:-|$)")
 OCR_ID = re.compile(r"^OCR-(.+)-\d+$")
 
@@ -41,7 +65,7 @@ def main() -> int:
     indexed = {row["source_path"] for row in base if row.get("source_path")}
     images = {row["id"] for row in base if row.get("kind") == "image"}
     current = {path.relative_to(root).as_posix(): path for path in root.rglob("*")
-               if path.is_file() and path.suffix.lower() in EXTENSIONS}
+               if path.is_file() and path.suffix.lower() in EXTENSIONS and not excluded_source(path, root)}
     missing = sorted(indexed - current.keys())
     new = sorted(current.keys() - indexed)
     indexed_digests = {}
