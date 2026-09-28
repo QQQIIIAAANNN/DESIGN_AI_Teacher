@@ -89,14 +89,12 @@ export async function generateSuggestion(data: FormData) {
       : `局部繪圖失敗（HTTP ${response.status}）。`);
     const raw = parseJsonContent(extractText(await response.json())) as Record<string, unknown>;
     const summary = typeof raw.summary === "string" ? raw.summary.slice(0, 300) : "局部修改示意";
-    if (raw.mode !== "image") {
-      try {
-        const plan = normalizeSuggestionPlan(raw);
-        if (plan.elements.filter((element) => element.type !== "label").length >= 2) {
-          return { kind: "svg" as const, plan };
-        }
-      } catch { /* Try image editing when vector geometry is not trustworthy. */ }
-    }
+    try {
+      const plan = normalizeSuggestionPlan(raw);
+      if (plan.elements.filter((element) => element.type !== "label").length >= 2) {
+        return { kind: "svg" as const, plan };
+      }
+    } catch { /* Try image editing when vector geometry is not trustworthy. */ }
     const imagePrompt = typeof raw.imagePrompt === "string" && raw.imagePrompt.trim()
       ? raw.imagePrompt.trim() : `Edit this cropped architectural plan only around this issue: ${title}. Problem: ${description}. Proposed change: ${suggestion}. Preserve orientation, all unaffected geometry and labels. Draw a restrained architectural improvement overlay.`;
     const image = await generateEditedImage(crop, imagePrompt, model || status.models[0], status.models);
