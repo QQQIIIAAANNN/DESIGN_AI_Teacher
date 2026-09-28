@@ -6,7 +6,7 @@ import type {
 } from "@/lib/review-schema";
 import { observationPrompt, normalizeObservation, applyObservationOverrides, type ObservationOverrides } from "@/lib/review-observation";
 import { retrieveKnowledge, knowledgeQuery, knowledgePrompt } from "@/lib/knowledge-retrieval";
-import { calibrateReview } from "@/lib/review-rubric";
+import { calibrateReview, resolveReviewRubric } from "@/lib/review-rubric";
 import { reviewByTopics } from "@/lib/review-topics";
 import { getKnowledgeImageDataUrl } from "@/lib/private-knowledge";
 import { groundReview } from "@/lib/review-grounding";
@@ -243,6 +243,7 @@ export class CliProxyReviewProvider implements ReviewProvider {
     const query = knowledgeQuery(observations, questionTitle, questionBrief);
     const result = await reviewByTopics({ questionTitle, questionBrief, observation: observations,
       confirmedRegions: input.confirmedRegions || [], intensityInstruction, examType: input.examType || "design",
+      rubric: resolveReviewRubric(questionContext, input.practiceQuestion),
       retrieve: (topicQuery, limit, focusKeys) => retrieveKnowledge(`${query} ${topicQuery}`, input.examType || "design", limit, focusKeys),
       invoke: async (system, user, maxTokens, imageRefs) => {
         const images = (await Promise.all(imageRefs.map(async (id) => ({ id, url: await getKnowledgeImageDataUrl(id) }))))

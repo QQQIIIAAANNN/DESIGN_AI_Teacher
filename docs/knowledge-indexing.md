@@ -49,6 +49,18 @@ $env:KNOWLEDGE_SOURCE_DIR="D:\K圖會"
 
 正式部署時，這兩個路徑需位於只有伺服器可讀取的私有磁碟；不可公開 `knowledge/private/`、原始 PDF 或圖片。Supabase 的結構表目前不能取代這個本機向量索引；若遷移到雲端，需先完成私有物件儲存、權限與向量匯入。部署時也要套用 `supabase/migrations/20260926000100_review_strengths.sql`，讓值得保留的審圖項目能保存。
 
+## 人工回饋核心記憶
+
+意見卡的「判斷正確／部分正確／誤判／位置錯誤」會以結構化 Markdown 追加至：
+
+```text
+knowledge/private/core-memory/review-feedback.md
+```
+
+可以用 `REVIEW_MEMORY_FILE` 改指其他私有路徑。回饋寫入經過會員驗證（若已設定 Supabase），並會限制長度、清理 Markdown/HTML 控制文字。檢索時它會以 `user_feedback_memory` / `feedback_record` 和 canonical 準則、私有教材同時召回，但只能當作人工修正訊號，不得取代當次圖面證據、題目條件或正式法規。
+
+這個檔案屬於使用者行為與圖面關聯資料，已由 `knowledge/private/` 排除 Git；備份、存取權與保留週期應比照私有教材處理。
+
 ## 來源異動
 
 `npm run audit:knowledge` 會唯讀比對目前資料夾與索引，列出已刪除、新增或內容已改變的來源，以及無對應原圖的 OCR／向量紀錄。來源資料夾目前有 71 份 PDF 與 558 張獨立圖片。知識快照排除 10 份純考題／作業 PDF、講義中的 6 頁純題目，以及考題分析資料夾內 6 張純題目影像；其餘 61 份 PDF 和 552 張獨立圖片納入檢索。建索引和稽核會略過「知識索引」工作資料夾，並沿用同一排除清單。稽核也會核對來源大小與修改時間；被刪除或替換的來源會從審圖檢索中排除。

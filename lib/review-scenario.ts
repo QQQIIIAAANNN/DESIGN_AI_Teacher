@@ -21,7 +21,7 @@ export const reviewScenarios = [
     minutes: 360,
     range: "6 小時",
     description: "完整回應題目機能，兼顧配置、平面、空間及環境策略。",
-    expectation: "檢核題目需求、基地、平面機能、空間層次、動線、環境與圖面表達；對關鍵缺圖或論證不足明確扣分。"
+    expectation: "檢核題目需求、基地、平面機能、空間層次、動線、環境與圖面表達；關鍵缺圖或論證不足須反映於對應題目給分項的達成程度與理由。"
   },
   {
     id: "design_8h",
@@ -57,6 +57,6 @@ export function reviewScenarioInstruction(id: ReviewScenarioId, minutes: number)
     `審查門檻：${scenario.expectation}`,
     "依題目明示圖說與本次時間判斷完成度；不可因為是短時間練習就忽略主入口、需求漏項或重大動線問題。",
     "只評論可見圖面與已提供題目；未繪出的內容可列『尚未證明』，不得推定一定不存在。",
-    "各項分數仍須有具體圖面證據，不能因情境自動給高分或通過。"
+    "各題目給分項的評估仍須有具體圖面證據；題目未明載配分時只能標示達成狀態，不能因情境自動給高分或通過。"
   ].join("\n");
 }

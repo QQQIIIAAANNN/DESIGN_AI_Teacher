@@ -1,138 +1,174 @@
-import type { DrawingReview, ReviewDimension, ReviewObservation } from "@/lib/review-schema";
+import type { PracticeQuestion } from "@/lib/practice-question";
+import type { QuestionContext } from "@/lib/question-context";
+import type {
+  DrawingReview,
+  ReviewAssessment,
+  ReviewDimension,
+  ReviewObservation,
+  ReviewRubricSource,
+  ReviewScoringMode
+} from "@/lib/review-schema";
 import { getReviewScenario } from "@/lib/review-scenario";
 
-export const reviewRubric = [
-  { key: "brief", label: "題意與機能需求", maxScore: 20 },
-  { key: "site", label: "基地紋理與建築計畫", maxScore: 20 },
-  { key: "spatial", label: "空間層次與公共性", maxScore: 25 },
-  { key: "circulation", label: "入口與動線", maxScore: 20 },
-  { key: "representation", label: "圖面可讀性與論證", maxScore: 15 }
-] as const;
-
-const requiredByScenario = {
-  quick_study: ["brief", "site", "program", "concept", "spatial_sequence", "entrance", "circulation"],
-  site_4h: ["brief", "site", "program", "indoor_outdoor", "circulation", "environment", "representation"],
-  civil_6h: ["brief", "site", "program", "concept", "privacy", "circulation", "environment", "representation"],
-  design_8h: ["brief", "site", "program", "concept", "indoor_outdoor", "openness", "privacy", "spatial_sequence",
-    "entrance", "circulation", "accessibility", "operation", "environment", "sustainability", "structure", "representation"]
-} as const;
-
-const dimensionTopics: Record<typeof reviewRubric[number]["key"], string[]> = {
-  brief: ["brief", "program"],
-  site: ["site", "environment"],
-  spatial: ["indoor_outdoor", "openness", "privacy", "spatial_sequence"],
-  circulation: ["entrance", "circulation", "accessibility"],
-  representation: ["representation", "concept", "structure"]
+export type ResolvedReviewRubricItem = {
+  key: string;
+  section: string;
+  label: string;
+  criterion: string;
+  maxScore: number | null;
+  source: ReviewRubricSource;
 };
 
-export function calibrateReview(review: DrawingReview, brief: string, observation: ReviewObservation, questionConfidence?: number): DrawingReview {
-  const notes: string[] = [];
-  const required = review.scenario ? new Set<string>(requiredByScenario[review.scenario]) : new Set<string>();
-  let dimensions: ReviewDimension[] = reviewRubric.map((rubric) => {
-    const raw = review.dimensions.find((item) => item.key === rubric.key);
-    if (!raw) {
-      notes.push(`${rubric.label}未完成評分`);
-      return { ...rubric, score: 0, confidence: 0, rationale: "缺少模型評估", evidence: "" };
-    }
-    let score = Math.max(0, Math.min(rubric.maxScore, Math.round(raw.score / raw.maxScore * rubric.maxScore)));
-    if (!raw.evidence?.trim() || !raw.rationale?.trim() || !raw.sourceRefs?.length) {
-      score = Math.min(score, Math.floor(rubric.maxScore * 0.5));
-      notes.push(`${rubric.label}缺少可核對的理由、圖面證據或知識依據`);
-    }
-    const evidenceConfidence = Math.min(raw.confidence, raw.evidenceConfidence ?? raw.confidence);
-    if (evidenceConfidence < 0.5) {
-      score = Math.min(score, Math.floor(rubric.maxScore * 0.5));
-      notes.push(`${rubric.label}證據信心偏低`);
-    } else if (evidenceConfidence < 0.7) {
-      score = Math.min(score, Math.floor(rubric.maxScore * 0.7));
-      notes.push(`${rubric.label}證據信心未達高分門檻`);
-    }
-    const expectedTopics = dimensionTopics[rubric.key].filter((key) => required.has(key));
-    const missingTopics = expectedTopics.filter((key) =>
-      !review.coverage?.some((item) => item.key === key && item.status === "reviewed")).length;
-    if (missingTopics) {
-      score = Math.min(score, Math.floor(rubric.maxScore * (missingTopics >= 2 ? 0.6 : 0.75)));
-      notes.push(`${rubric.label}有 ${missingTopics} 項核心主題缺少可核對的圖面證據`);
-    }
-    if (rubric.key === "brief" && !brief.trim()) score = Math.min(score, 8);
-    if (rubric.key === "site" && !observation.siteEvidence.length && !brief.trim()) score = Math.min(score, 8);
-    return { ...rubric, score, confidence: raw.confidence, evidenceConfidence: raw.evidenceConfidence,
-      rationale: raw.rationale, evidence: raw.evidence, sourceRefs: raw.sourceRefs };
+export type ResolvedReviewRubric = {
+  items: ResolvedReviewRubricItem[];
+  mode: ReviewScoringMode;
+  totalMaxScore: number | null;
+  sourceLabel: string;
+};
+
+const platformReferenceItems: ResolvedReviewRubricItem[] = [
+  { key: "brief", section: "平台參考", label: "題意與機能需求", criterion: "核對題目目標、空間計畫與必要需求。", maxScore: null, source: "platform_reference" },
+  { key: "site", section: "平台參考", label: "基地紋理與建築計畫", criterion: "核對基地條件、鄰里界面與配置策略。", maxScore: null, source: "platform_reference" },
+  { key: "spatial", section: "平台參考", label: "空間層次與公共性", criterion: "核對室內外、開放程度及公共與私密層次。", maxScore: null, source: "platform_reference" },
+  { key: "circulation", section: "平台參考", label: "入口與動線", criterion: "核對主要到達、入口辨識與人車服務動線。", maxScore: null, source: "platform_reference" },
+  { key: "representation", section: "平台參考", label: "圖面可讀性與論證", criterion: "核對應交圖說、標註與設計論證是否可讀。", maxScore: null, source: "platform_reference" }
+];
+
+function groupedItem(key: string, section: string, label: string, criteria: string[], source: ReviewRubricSource): ResolvedReviewRubricItem | null {
+  const filtered = criteria.map((item) => item.trim()).filter(Boolean).slice(0, 20);
+  if (!filtered.length) return null;
+  return { key, section, label, criterion: filtered.join("；"), maxScore: null, source };
+}
+
+function uniqueKeys(items: ResolvedReviewRubricItem[]) {
+  const used = new Set<string>();
+  return items.map((item, index) => {
+    let key = item.key || `rubric-${index + 1}`;
+    while (used.has(key)) key = `${item.key || "rubric"}-${index + 1}`;
+    used.add(key);
+    return { ...item, key };
   });
-  let scoreCap = 100;
-  if (!brief.trim()) {
-    scoreCap = Math.min(scoreCap, 59);
-    notes.push("未提供完整題目條件，題意項上限 8 分、總分暫評上限 59");
+}
+
+export function resolveReviewRubric(questionContext?: QuestionContext | null, practiceQuestion?: PracticeQuestion | null): ResolvedReviewRubric {
+  if (questionContext?.scoringItems?.length) {
+    const items = uniqueKeys(questionContext.scoringItems.map((item) => ({
+      key: item.key,
+      section: item.section || "題目評分項目",
+      label: item.label,
+      criterion: item.criteria.length ? item.criteria.join("；") : item.sourceText,
+      maxScore: item.maxScore,
+      source: "question_explicit" as const
+    })));
+    const scoredCount = items.filter((item) => item.maxScore !== null).length;
+    const mode: ReviewScoringMode = scoredCount === items.length
+      ? "question_points" : scoredCount ? "question_mixed" : "question_criteria";
+    return { items, mode,
+      totalMaxScore: mode === "question_points"
+        ? items.reduce((sum, item) => sum + (item.maxScore || 0), 0) : null,
+      sourceLabel: "題目明示的給分項目" };
   }
-  if (questionConfidence !== undefined && questionConfidence < 0.6) {
-    scoreCap = Math.min(scoreCap, 64);
-    notes.push("題目 PDF 判讀信心偏低，總分暫評上限 64，請核對題目內容");
+
+  if (questionContext) {
+    const items = [
+      groupedItem("question-program", "題目要求", "建築計畫與需求", questionContext.requirements, "question_deliverable"),
+      groupedItem("question-drawings", "題目要求", "應交圖說", questionContext.drawingRequirements, "question_deliverable"),
+      groupedItem("question-constraints", "題目要求", "限制條件", questionContext.constraints, "question_deliverable")
+    ].filter((item): item is ResolvedReviewRubricItem => item !== null);
+    if (items.length) return { items, mode: "question_criteria", totalMaxScore: null,
+      sourceLabel: "題目未列配分，依題目要求檢核" };
   }
+
+  if (practiceQuestion) {
+    const items = [
+      groupedItem("practice-program", "模擬題", "建築計畫與機能", practiceQuestion.program, "practice_question"),
+      groupedItem("practice-tasks", "模擬題", "設計課題", practiceQuestion.designTasks, "practice_question"),
+      groupedItem("practice-drawings", "模擬題", "應交圖說", practiceQuestion.drawingRequirements, "practice_question")
+    ].filter((item): item is ResolvedReviewRubricItem => item !== null);
+    if (items.length) return { items, mode: "question_criteria", totalMaxScore: null,
+      sourceLabel: "模擬題要求（未設定配分）" };
+  }
+
+  return { items: platformReferenceItems.map((item) => ({ ...item })), mode: "platform_reference",
+    totalMaxScore: null, sourceLabel: "未提供題目評分項目，僅作平台檢核" };
+}
+
+function assessmentFromRatio(score: number, maxScore: number): ReviewAssessment {
+  const ratio = maxScore > 0 ? score / maxScore : 0;
+  if (ratio >= 0.85) return "excellent";
+  if (ratio >= 0.7) return "good";
+  if (ratio >= 0.5) return "partial";
+  return "insufficient";
+}
+
+function validAssessment(value: ReviewAssessment | undefined): ReviewAssessment | undefined {
+  return value === "excellent" || value === "good" || value === "partial" ||
+    value === "insufficient" || value === "unverified" ? value : undefined;
+}
+
+export function calibrateReview(review: DrawingReview, _brief: string, observation: ReviewObservation,
+  questionConfidence?: number): DrawingReview {
+  const rubric = resolveReviewRubric(review.questionContext, review.practiceQuestion);
+  const validKeys = new Set(rubric.items.map((item) => item.key));
+  const issueIds = new Set(review.issues.map((issue) => issue.id));
+  const issues = review.issues.map((issue) => ({ ...issue,
+    rubricRefs: (issue.rubricRefs || []).filter((key) => validKeys.has(key)).slice(0, 8) }));
+
+  const dimensions: ReviewDimension[] = rubric.items.map((item) => {
+    const raw = review.dimensions.find((dimension) => dimension.key === item.key) ||
+      review.dimensions.find((dimension) => dimension.label.trim() === item.label.trim());
+    const supported = Boolean(raw?.rationale?.trim() && raw?.evidence?.trim());
+    const score = supported && item.maxScore !== null && typeof raw?.score === "number" && Number.isFinite(raw.score)
+      ? Math.max(0, Math.min(item.maxScore, raw.score)) : null;
+    const linkedFromScore = (raw?.relatedIssueIds || []).filter((id) => issueIds.has(id));
+    const linkedFromFindings = issues.filter((issue) => issue.rubricRefs?.includes(item.key)).map((issue) => issue.id);
+    const relatedIssueIds = [...new Set([...linkedFromScore, ...linkedFromFindings])].slice(0, 20);
+    const evidenceConfidence = Math.min(raw?.confidence ?? 0.4, raw?.evidenceConfidence ?? raw?.confidence ?? 0.4);
+    const assessment = !supported ? "unverified" : validAssessment(raw?.assessment) ||
+      (score !== null && item.maxScore !== null ? assessmentFromRatio(score, item.maxScore)
+        : evidenceConfidence < 0.45 ? "unverified" : "partial");
+    return {
+      key: item.key,
+      section: item.section,
+      label: item.label,
+      criterion: item.criterion,
+      score,
+      maxScore: item.maxScore,
+      assessment,
+      rubricSource: item.source,
+      relatedIssueIds,
+      confidence: raw?.confidence ?? 0.4,
+      evidenceConfidence: raw?.evidenceConfidence ?? raw?.confidence ?? 0.4,
+      rationale: raw?.rationale || "尚未取得足夠的分項判讀理由。",
+      evidence: raw?.evidence || "",
+      sourceRefs: raw?.sourceRefs || []
+    };
+  });
+
+  const fullyScored = rubric.mode === "question_points" && dimensions.length > 0 &&
+    dimensions.every((item) => item.score !== null && item.maxScore !== null);
+  const overallScore = fullyScored
+    ? dimensions.reduce((sum, item) => sum + (item.score || 0), 0) : null;
+  const overallMaxScore = fullyScored
+    ? dimensions.reduce((sum, item) => sum + (item.maxScore || 0), 0) : rubric.totalMaxScore;
+  const linkedIssues = issues.map((issue) => ({ ...issue,
+    rubricRefs: [...new Set([...(issue.rubricRefs || []), ...dimensions
+      .filter((dimension) => dimension.relatedIssueIds?.includes(issue.id)).map((dimension) => dimension.key)])].slice(0, 8) }));
+  const linkedCount = linkedIssues.filter((issue) => issue.rubricRefs?.length).length;
+  const notes = [rubric.sourceLabel];
+  if (rubric.mode === "question_points") notes.push(fullyScored
+    ? `總分由 ${dimensions.length} 個題目配分直接加總，未從意見卡倒扣`
+    : "部分給分項證據不足，暫不加總總分");
+  if (rubric.mode === "question_mixed") notes.push("題目只有部分項目標明配分，為避免錯誤分母，本次不加總總分");
+  if (rubric.mode === "question_criteria") notes.push("題目未明載各項上限，改顯示達成狀態，不自行平均配分");
+  if (rubric.mode === "platform_reference") notes.push("未提供題目 rubric，不顯示假定百分制分數");
+  notes.push(`${linkedCount}/${issues.length} 則審圖意見已連到給分項`);
+  if (questionConfidence !== undefined && questionConfidence < 0.6) notes.push("題目判讀信心偏低，請核對原題");
   const uncertain = Object.values(observation.checks).filter((check) => check.status === "uncertain").length;
-  if (uncertain >= 2) {
-    scoreCap = Math.min(scoreCap, 79);
-    notes.push("多項重要圖面要素仍待辨識，暫評上限 79，請依待確認項目補局部圖");
-  }
-  const supportedIssues = review.issues.filter((issue) => issue.kind === "issue" && !issue.locationUnresolved &&
-    (issue.evidenceConfidence ?? issue.confidence) >= 0.7 && !!issue.evidence?.trim() &&
-    !!issue.criterion?.trim() && !!issue.sourceRefs?.length);
-  const highIssues = supportedIssues.filter((issue) => issue.severity === "high").length;
-  if (highIssues >= 2) {
-    scoreCap = Math.min(scoreCap, 49);
-    notes.push("至少兩項有證據的重大問題，暫評上限 49");
-  } else if (highIssues === 1) {
-    scoreCap = Math.min(scoreCap, 59);
-    notes.push("一項有證據的重大問題，暫評上限 59");
-  }
-  const mediumIssues = supportedIssues.filter((issue) => issue.severity === "medium").length;
-  if (mediumIssues >= 3) {
-    scoreCap = Math.min(scoreCap, 69);
-    notes.push("至少三項有證據的中度問題，暫評上限 69");
-  } else if (mediumIssues >= 2) {
-    scoreCap = Math.min(scoreCap, 74);
-    notes.push("至少兩項有證據的中度問題，暫評上限 74");
-  }
-  const lackingEvidence = [...required].filter((key) =>
-    !review.coverage?.some((item) => item.key === key && item.status === "reviewed")).length;
-  if (lackingEvidence >= 5) {
-    scoreCap = Math.min(scoreCap, 59);
-    notes.push(`${lackingEvidence} 項本情境核心主題仍缺圖面證據，總分暫評上限 59`);
-  } else if (lackingEvidence >= 3) {
-    scoreCap = Math.min(scoreCap, 69);
-    notes.push(`${lackingEvidence} 項本情境核心主題仍缺圖面證據，總分暫評上限 69`);
-  } else if (lackingEvidence > 0) {
-    scoreCap = Math.min(scoreCap, 79);
-    notes.push(`${lackingEvidence} 項本情境核心主題仍缺圖面證據，總分暫評上限 79`);
-  }
-  const supportedStrengths = review.issues.filter((issue) => issue.kind === "strength" &&
-    !issue.locationUnresolved && (issue.evidenceConfidence ?? issue.confidence) >= 0.7 &&
-    !!issue.evidence?.trim() && !!issue.criterion?.trim() && !!issue.sourceRefs?.length).length;
-  if (supportedStrengths < 2) {
-    scoreCap = Math.min(scoreCap, 79);
-    notes.push("缺少至少兩項可核對的優點，高分尚無足夠正面證據，暫評上限 79");
-  }
-  const unresolvedLocations = review.issues.filter((issue) => issue.locationUnresolved).length;
-  if (unresolvedLocations >= 3) {
-    scoreCap = Math.min(scoreCap, 69);
-    notes.push(`${unresolvedLocations} 項意見尚未能在原圖定位，暫評上限 69`);
-  } else if (unresolvedLocations > 0) {
-    scoreCap = Math.min(scoreCap, 84);
-    notes.push(`${unresolvedLocations} 項意見尚未能在原圖定位，暫評上限 84`);
-  }
-  const rawTotal = dimensions.reduce((sum, item) => sum + item.score, 0);
-  if (rawTotal > scoreCap) {
-    const scaled = dimensions.map((item, index) => ({ index, exact: item.score * scoreCap / rawTotal,
-      score: Math.floor(item.score * scoreCap / rawTotal) }));
-    let remaining = scoreCap - scaled.reduce((sum, item) => sum + item.score, 0);
-    for (const item of [...scaled].sort((a, b) => (b.exact - b.score) - (a.exact - a.score))) {
-      if (remaining <= 0) break;
-      item.score += 1;
-      remaining -= 1;
-    }
-    dimensions = dimensions.map((item, index) => ({ ...item, score: scaled[index].score }));
-    notes.push("暫評上限已按比例反映在五項分數");
-  }
-  const overallScore = dimensions.reduce((sum, item) => sum + item.score, 0);
-  const context = review.scenario ? `${getReviewScenario(review.scenario).label} · ${review.targetMinutes || getReviewScenario(review.scenario).minutes} 分鐘；` : "";
-  return { ...review, dimensions, overallScore, scoreNote: `平台練習暫評，非官方成績。${context}${notes.join("；") || "依五項評分與圖面證據計算。"}` };
+  if (uncertain) notes.push(`${uncertain} 個重要圖面要素仍待確認`);
+  const context = review.scenario
+    ? `${getReviewScenario(review.scenario).label} · ${review.targetMinutes || getReviewScenario(review.scenario).minutes} 分鐘` : "";
+
+  return { ...review, issues: linkedIssues, dimensions, overallScore, overallMaxScore, scoringMode: rubric.mode,
+    scoreNote: `平台練習暫評，非官方成績。${context ? `${context}；` : ""}${notes.join("；")}。` };
 }

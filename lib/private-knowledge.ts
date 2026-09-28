@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import sharp from "sharp";
 import type { RetrievedKnowledge } from "@/lib/review-schema";
+import { reviewMemoryStats } from "@/lib/review-memory";
 
 type PrivateRow = {
   id: string;
@@ -14,6 +15,11 @@ type PrivateRow = {
   page: number | null;
   text: string;
   image_ref?: string;
+  building_types?: string[];
+  topic_tags?: string[];
+  source_category?: string;
+  visual_type?: string;
+  visual_review_status?: string;
 };
 
 type Cache = { mtime: number; augmentationMtime: number; checkedAt: number; staleSources: number; rows: PrivateRow[]; postings: Map<string, number[]>; lengths: number[] };
@@ -157,7 +163,9 @@ export async function searchPrivateKnowledge(query: string, limit = 8, focusKeys
     const row = rows[index];
     return { id: row.id, sourceTitle: `${row.source_title}${row.page ? ` · 第 ${row.page} 頁` : ""}`,
       sourceType: "course_material_unreviewed", knowledgeType: row.kind === "image" ? "visual_reference" : "source_excerpt",
-      statement: row.text.slice(0, 850), imageRefs: row.image_ref ? [row.id] : [] };
+      statement: row.text.slice(0, 850), imageRefs: row.image_ref ? [row.id] : [], sourcePath: row.source_path,
+      page: row.page ?? undefined, buildingTypes: row.building_types || [], topicTags: row.topic_tags || [],
+      sourceCategory: row.source_category, visualType: row.visual_type, visualReviewStatus: row.visual_review_status };
   });
 }
 
@@ -206,6 +214,7 @@ export async function getKnowledgeImageDataUrl(id: string): Promise<string | nul
 
 export async function privateKnowledgeStats() {
   const { rows, staleSources } = await load();
+  const memory = await reviewMemoryStats();
   let imageEmbeddings = 0;
   try {
     const validImageIds = new Set(rows.filter((row) => row.kind === "image").map((row) => row.id));
@@ -217,5 +226,6 @@ export async function privateKnowledgeStats() {
   } catch { /* The image vector index is optional. */ }
   return { textChunks: rows.filter((row) => row.kind === "text").length,
     imagePages: rows.filter((row) => row.kind === "image").length,
-    imageEmbeddings, sourceCount: new Set(rows.map((row) => row.source_path)).size, staleSources };
+    imageEmbeddings, sourceCount: new Set(rows.map((row) => row.source_path)).size, staleSources,
+    memoryEntries: memory.entries, memoryPath: memory.memoryPath };
 }

@@ -1,12 +1,14 @@
 "use client";
 
-import { ChangeEvent, type MouseEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, type MouseEvent, type PointerEvent, type SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DrawingReview,
   ConfirmedRegion,
   ReviewItem,
+  ReviewFeedbackDraft,
   DiscussionMessage,
   ReviewSeverity,
+  RetrievedKnowledge,
   SupplementReviewResult
 } from "@/lib/review-schema";
 import type { ReviewIntensity } from "@/lib/review-provider";
@@ -43,21 +45,52 @@ import {
   reviewSupplementWithAi
 } from "@/lib/ai-proxy-client";
 import { normalizeSuggestionPlan, renderSuggestionSvg } from "@/lib/suggestion-svg";
+import ReviewFeedbackPanel, { type FeedbackSaveState } from "./review-feedback";
 
-const defaultDimensions = [
-  "題意與機能需求",
-  "基地紋理與建築計畫",
-  "空間層次與公共性",
-  "入口與動線",
-  "圖面可讀性與論證"
-];
+const assessmentLabels = {
+  excellent: "充分達成",
+  good: "大致達成",
+  partial: "部分達成",
+  insufficient: "尚未達成",
+  unverified: "待確認"
+} as const;
+
+const scoringModeLabels = {
+  question_points: "依題目配分",
+  question_mixed: "題目部分配分",
+  question_criteria: "依題目項目檢核",
+  platform_reference: "平台參考檢核"
+} as const;
 
 const severityLabels: Record<ReviewSeverity, string> = {
-  high: "高",
-  medium: "中",
-  low: "低",
-  info: "需補圖"
+  high: "最嚴重",
+  medium: "中等",
+  low: "輕度",
+  info: "待確認"
 };
+
+type IssueGroupKey = "critical" | "medium" | "light" | "good";
+
+const issueGroupDefinitions: Array<{ key: IssueGroupKey; label: string; description: string }> = [
+  { key: "critical", label: "最嚴重", description: "先處理最影響題意、安全、動線或通關的問題" },
+  { key: "medium", label: "中等", description: "接著修正核心空間關係，也包含需要補證據的判斷" },
+  { key: "light", label: "輕度", description: "不影響主要解題，有時間再微調" },
+  { key: "good", label: "良好（保持）", description: "已有圖面證據的有效做法，修改時請保留" }
+];
+
+function issueGroupKey(issue: ReviewItem): IssueGroupKey {
+  if (issue.kind === "strength") return "good";
+  if (issue.severity === "high") return "critical";
+  if (issue.severity === "medium" || issue.kind === "clarity_request") return "medium";
+  return "light";
+}
+
+function issuePriority(issue: ReviewItem) {
+  const severity = { high: 4, medium: 3, low: 2, info: 1 }[issue.severity];
+  const certainty = issue.evidenceConfidence ?? issue.confidence;
+  const unresolved = issue.locationUnresolved || issue.kind === "clarity_request" ? 0.5 : 0;
+  return severity * 100 + certainty * 10 + unresolved;
+}
 
 const isStaticDemo = process.env.NEXT_PUBLIC_STATIC_DEMO === "true";
 const liveReviewEnabled = isLiveReviewConfigured();
@@ -68,6 +101,71 @@ async function reviewApiHeaders(): Promise<HeadersInit | undefined> {
   if (!supabaseConnected) return undefined;
   const session = await getSavedSession();
   return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined;
+}
+
+function KnowledgeReferenceImage({ id, page }: { id: string; page?: number }) {
+  const [image, setImage] = useState<{ status: "idle" | "loading" | "ready" | "error"; url?: string }>({ status: "idle" });
+  const requested = useRef(false);
+
+  async function loadImage() {
+    if (requested.current) return;
+    requested.current = true;
+    setImage({ status: "loading" });
+    try {
+      const formData = new FormData();
+      formData.set("action", "knowledge-image");
+      formData.set("id", id);
+      const response = await fetch("/api/review", { method: "POST", body: formData, headers: await reviewApiHeaders() });
+      if (!response.ok) throw new Error("索引圖片無法讀取。");
+      const payload = await response.json() as { dataUrl?: unknown };
+      if (typeof payload.dataUrl !== "string" || !payload.dataUrl.startsWith("data:image/")) {
+        throw new Error("索引圖片資料格式不正確。");
+      }
+      setImage({ status: "ready", url: payload.dataUrl });
+    } catch {
+      requested.current = false;
+      setImage({ status: "error" });
+    }
+  }
+
+  return <details className="knowledge-reference-image" onToggle={(event: SyntheticEvent<HTMLDetailsElement>) => {
+    if (event.currentTarget.open && (image.status === "idle" || image.status === "error")) void loadImage();
+  }}>
+    <summary>{page ? `查看 PDF 第 ${page} 頁圖面` : "查看索引圖片"}</summary>
+    {image.status === "loading" && <p>正在讀取索引圖面…</p>}
+    {image.status === "error" && <p className="knowledge-image-error">圖片暫時無法讀取，索引文字仍可查看。</p>}
+    {image.status === "ready" && image.url && <img src={image.url} alt={page ? `索引 PDF 第 ${page} 頁` : "索引參考圖片"} loading="lazy" />}
+  </details>;
+}
+
+function IssueKnowledgePanel({ issue, knowledge }: { issue: ReviewItem; knowledge: RetrievedKnowledge[] }) {
+  const byId = new Map(knowledge.map((unit) => [unit.id, unit]));
+  const cited = [...new Set(issue.sourceRefs || [])].flatMap((id) => {
+    const unit = byId.get(id);
+    return unit ? [unit] : [];
+  });
+
+  return <details className="issue-knowledge" onClick={(event) => event.stopPropagation()}>
+    <summary>查看索引依據（{cited.length}{issue.sourceRefs?.length && cited.length !== issue.sourceRefs.length
+      ? `/${issue.sourceRefs.length}` : ""}）</summary>
+    {cited.length ? <div className="knowledge-reference-list">{cited.map((unit) => (
+      <article className="knowledge-reference-card" key={unit.id}>
+        <div className="knowledge-reference-heading">
+          <strong>{unit.sourceTitle}</strong><span>{unit.id}</span>
+        </div>
+        <div className="knowledge-reference-meta">
+          {unit.sourceCategory && <span>{unit.sourceCategory}</span>}
+          {unit.buildingTypes?.map((type) => <span key={type}>{type}</span>)}
+          {unit.topicTags?.map((tag) => <span key={tag}>{tag}</span>)}
+          {unit.visualType && <span>{unit.visualType}</span>}
+        </div>
+        <p className="knowledge-reference-text">{unit.statement}</p>
+        {unit.sourcePath && <p className="knowledge-reference-path">來源檔案：{unit.sourcePath}</p>}
+        {unit.visualReviewStatus && <p className="knowledge-reference-path">圖面判讀：{unit.visualReviewStatus}</p>}
+        {unit.imageRefs?.map((imageId) => <KnowledgeReferenceImage key={imageId} id={imageId} page={unit.page} />)}
+      </article>
+    ))}</div> : <p className="knowledge-reference-empty">這則意見沒有可用的索引來源，或工作檔未保存該次檢索內容。</p>}
+  </details>;
 }
 
 type SupplementState = {
@@ -122,9 +220,10 @@ function importedReviewOrNull(value: unknown): DrawingReview | null {
   const review = value as DrawingReview;
   if (typeof review.reviewId !== "string" || typeof review.drawingId !== "string" ||
       !Array.isArray(review.issues) || review.issues.length > 80 ||
-      !Array.isArray(review.dimensions) || review.dimensions.length > 20 ||
+      !Array.isArray(review.dimensions) || review.dimensions.length > 40 ||
       review.dimensions.some((item) => !item || typeof item.key !== "string" || typeof item.label !== "string" ||
-        typeof item.score !== "number" || typeof item.maxScore !== "number") ||
+        !(item.score === null || typeof item.score === "number" && Number.isFinite(item.score) && item.score >= 0) ||
+        !(item.maxScore === null || typeof item.maxScore === "number" && Number.isFinite(item.maxScore) && item.maxScore > 0)) ||
       review.issues.some((item) => !item || typeof item.id !== "string" || typeof item.title !== "string" ||
         typeof item.description !== "string" || typeof item.suggestion !== "string" || !item.bbox ||
         ![item.bbox.x, item.bbox.y, item.bbox.w, item.bbox.h].every((number) => typeof number === "number" && Number.isFinite(number) && number >= 0 && number <= 1) ||
@@ -134,8 +233,13 @@ function importedReviewOrNull(value: unknown): DrawingReview | null {
   const safeContext = review.questionContext && Array.isArray(review.questionContext.requirements) &&
     Array.isArray(review.questionContext.siteConditions) && Array.isArray(review.questionContext.drawingRequirements) &&
     Array.isArray(review.questionContext.constraints) && Array.isArray(review.questionContext.uncertainties)
-    ? { ...review.questionContext, sourceUrl: review.questionContext.sourceUrl?.startsWith("https://wwwq.moex.gov.tw/")
-      ? review.questionContext.sourceUrl : undefined } : null;
+    ? { ...review.questionContext,
+      scoringItems: Array.isArray(review.questionContext.scoringItems)
+        ? review.questionContext.scoringItems.filter((item) => item && typeof item.key === "string" &&
+          typeof item.label === "string" && typeof item.sourceText === "string" && Array.isArray(item.criteria) &&
+          (item.maxScore === null || typeof item.maxScore === "number")).slice(0, 24) : [],
+      sourceUrl: review.questionContext.sourceUrl?.startsWith("https://wwwq.moex.gov.tw/")
+        ? review.questionContext.sourceUrl : undefined } : null;
   const observation = review.observations;
   const safeObservation = observation && observation.checks && typeof observation.checks === "object" &&
     Object.values(observation.checks).every((check) => check && typeof check.status === "string") &&
@@ -144,12 +248,42 @@ function importedReviewOrNull(value: unknown): DrawingReview | null {
   return { ...review, questionContext: safeContext, observations: safeObservation,
     scoreNote: typeof review.scoreNote === "string" ? review.scoreNote : undefined,
     overallScore: typeof review.overallScore === "number" ? review.overallScore : null,
+    overallMaxScore: typeof review.overallMaxScore === "number" ? review.overallMaxScore : null,
+    scoringMode: review.scoringMode === "question_points" || review.scoringMode === "question_mixed" ||
+      review.scoringMode === "question_criteria" || review.scoringMode === "platform_reference"
+      ? review.scoringMode : undefined,
+    dimensions: review.dimensions.map((item) => ({ ...item,
+      sourceRefs: Array.isArray(item.sourceRefs) ? item.sourceRefs.filter((ref): ref is string => typeof ref === "string").slice(0, 8) : [],
+      relatedIssueIds: Array.isArray(item.relatedIssueIds)
+        ? item.relatedIssueIds.filter((id): id is string => typeof id === "string").slice(0, 20) : [] })),
     issues: review.issues.map((item) => ({ ...item, redline: undefined,
-      sourceRefs: Array.isArray(item.sourceRefs) ? item.sourceRefs.filter((ref): ref is string => typeof ref === "string").slice(0, 8) : [] })),
+      sourceRefs: Array.isArray(item.sourceRefs) ? item.sourceRefs.filter((ref): ref is string => typeof ref === "string").slice(0, 8) : [],
+      rubricRefs: Array.isArray(item.rubricRefs) ? item.rubricRefs.filter((ref): ref is string => typeof ref === "string").slice(0, 8) : [] })),
     coverage: Array.isArray(review.coverage) ? review.coverage.filter((item) => item && typeof item.key === "string" &&
       typeof item.label === "string" && typeof item.summary === "string").slice(0, 40) : [],
     retrievedKnowledge: Array.isArray(review.retrievedKnowledge) ? review.retrievedKnowledge.filter((item) =>
       item && typeof item.id === "string" && typeof item.statement === "string").slice(0, 100) : [] };
+}
+
+function importedFeedbackDrafts(value: unknown): Record<string, ReviewFeedbackDraft> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const verdicts = new Set(["correct", "partially_correct", "misjudged", "wrong_location", "helpful", "unhelpful"]);
+  const bbox = (candidate: unknown) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return undefined;
+    const item = candidate as Record<string, unknown>;
+    if (![item.x, item.y, item.w, item.h].every((number) => typeof number === "number" && Number.isFinite(number) && number >= 0 && number <= 1)) return undefined;
+    const safe = { x: item.x as number, y: item.y as number, w: item.w as number, h: item.h as number };
+    return safe.w > 0 && safe.h > 0 && safe.x + safe.w <= 1.001 && safe.y + safe.h <= 1.001 ? safe : undefined;
+  };
+  return Object.fromEntries(Object.entries(value).slice(0, 80).flatMap(([id, candidate]) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const item = candidate as Record<string, unknown>;
+    if (typeof item.verdict !== "string" || !verdicts.has(item.verdict)) return [];
+    return [[id.slice(0, 160), { verdict: item.verdict,
+      misjudgmentType: typeof item.misjudgmentType === "string" ? item.misjudgmentType : undefined,
+      note: typeof item.note === "string" ? item.note.slice(0, 2000) : "",
+      originalBbox: bbox(item.originalBbox), correctedBbox: bbox(item.correctedBbox) } as ReviewFeedbackDraft]];
+  }));
 }
 
 function svgValue(value: number) {
@@ -186,6 +320,7 @@ export default function Home() {
   const [questionExpanded, setQuestionExpanded] = useState(true);
   const [observationsExpanded, setObservationsExpanded] = useState(false);
   const [pickingIssueId, setPickingIssueId] = useState("");
+  const [regionEditingIssueId, setRegionEditingIssueId] = useState("");
   const [pickingFeatureKey, setPickingFeatureKey] = useState<keyof ObservationOverrides | "">("");
   const [drawingZoom, setDrawingZoom] = useState(100);
   const [supplements, setSupplements] = useState<Record<string, SupplementState>>({});
@@ -213,6 +348,11 @@ export default function Home() {
   const [discussionErrors, setDiscussionErrors] = useState<Record<string, string>>({});
   const [discussionPending, setDiscussionPending] = useState<{ id: string; text: string } | null>(null);
   const [discussionStreamText, setDiscussionStreamText] = useState("");
+  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, ReviewFeedbackDraft>>({});
+  const [feedbackSaveStates, setFeedbackSaveStates] = useState<Record<string, FeedbackSaveState>>({});
+  const [expandedIssueGroups, setExpandedIssueGroups] = useState<Record<IssueGroupKey, boolean>>({
+    critical: true, medium: false, light: false, good: false
+  });
   const [persistedReview, setPersistedReview] = useState<PersistedReviewState | null>(null);
   const [persistenceNotice, setPersistenceNotice] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
@@ -228,15 +368,17 @@ export default function Home() {
   } | null>(null);
   const [isRefreshingProxy, setIsRefreshingProxy] = useState(false);
   const [knowledgeStats, setKnowledgeStats] = useState<{ sourceCount: number; textChunks: number;
-    imagePages: number; imageEmbeddings: number } | null>(null);
+    imagePages: number; imageEmbeddings: number; memoryEntries?: number } | null>(null);
   const suggestionGraphicUrls = useRef<string[]>([]);
   const aiSuggestionGraphicUrls = useRef<string[]>([]);
   const questionPdfInputRef = useRef<HTMLInputElement>(null);
   const bundleInputRef = useRef<HTMLInputElement>(null);
   const drawingViewportRef = useRef<HTMLDivElement>(null);
+  const canvasCardRef = useRef<HTMLDivElement>(null);
   const reviewPanelRef = useRef<HTMLElement>(null);
   const overlayDrag = useRef<{ id: string; mode: "move" | "resize"; startX: number; startY: number;
     initial: ReviewItem["bbox"]; latest: ReviewItem["bbox"]; frameId: number | null } | null>(null);
+  const regionEditingStartRef = useRef<{ id: string; bbox: ReviewItem["bbox"] } | null>(null);
   const suppressOverlayClick = useRef(false);
   const skipCanvasFocusIssueId = useRef("");
   const pendingZoomAnchor = useRef<{ x: number; y: number } | null>(null);
@@ -381,7 +523,7 @@ export default function Home() {
           dataUrl: await fileDataUrl(new File([questionPdf], questionPdf.name, { type: "application/pdf" })) } : null,
         selectedQuestionId: selectedQuestion?.id || null, generatedQuestion, selectedScenario, targetMinutes,
         timerRemaining: timerRunning ? Math.max(0, Math.ceil((timerEndAt - Date.now()) / 1000)) : timerRemaining,
-        review, confirmedRegions, observationOverrides, discussions
+        review, confirmedRegions, observationOverrides, discussions, feedbackDrafts
       };
       const url = URL.createObjectURL(new Blob([JSON.stringify(bundle)], { type: "application/json" }));
       const anchor = document.createElement("a");
@@ -389,7 +531,7 @@ export default function Home() {
       anchor.download = `審圖工作檔-${new Date().toISOString().slice(0, 10)}.json`;
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setTransferNotice("已匯出圖面、題目、審圖意見、定位與卡片討論。局部修改圖請於各卡片另行下載。");
+      setTransferNotice("已匯出圖面、題目、審圖意見、定位、人工回饋與卡片討論。局部修改圖請於各卡片另行下載。");
     } catch (error) { setTransferNotice(error instanceof Error ? error.message : "匯出失敗。"); }
   }
 
@@ -439,6 +581,8 @@ export default function Home() {
           Array.isArray(messages) ? messages.slice(-20).flatMap((message) =>
             message && (message.role === "user" || message.role === "assistant") && typeof message.text === "string"
               ? [{ role: message.role, text: message.text.slice(0, 2000), verdict: message.verdict }] : []) : []])) : {});
+      setFeedbackDrafts(importedFeedbackDrafts(bundle.feedbackDrafts));
+      setFeedbackSaveStates({});
       setDiscussionOpenId("");
       setDiscussionPending(null);
       setDiscussionStreamText("");
@@ -553,24 +697,36 @@ export default function Home() {
   }, []);
 
   const issues = review?.issues ?? [];
-  const displayDimensions =
-    review?.dimensions ??
-    defaultDimensions.map((label) => ({
-      key: label,
-      label,
-      score: null,
-      maxScore: null,
-      confidence: 0,
-      evidenceConfidence: 0,
-      rationale: "",
-      evidence: "",
-      sourceRefs: [] as string[]
-    }));
+  const orderedIssues = useMemo(() => [...issues].sort((left, right) => {
+    const groupOrder = issueGroupDefinitions.findIndex((group) => group.key === issueGroupKey(left)) -
+      issueGroupDefinitions.findIndex((group) => group.key === issueGroupKey(right));
+    return groupOrder || issuePriority(right) - issuePriority(left) || left.title.localeCompare(right.title, "zh-Hant");
+  }), [issues]);
+  const groupedIssues = useMemo<Record<IssueGroupKey, ReviewItem[]>>(() => {
+    const groups: Record<IssueGroupKey, ReviewItem[]> = { critical: [], medium: [], light: [], good: [] };
+    orderedIssues.forEach((issue) => groups[issueGroupKey(issue)].push(issue));
+    return groups;
+  }, [orderedIssues]);
+  const issueNumberById = useMemo(() => new Map(orderedIssues.map((issue, index) => [issue.id, index + 1])), [orderedIssues]);
+  const displayDimensions = review?.dimensions ?? [];
 
   const activeIssue = useMemo<ReviewItem | undefined>(
     () => issues.find((issue) => issue.id === activeId),
     [activeId, issues]
   );
+
+  useEffect(() => {
+    if (!review) return;
+    const first = issueGroupDefinitions.find((group) => groupedIssues[group.key].length)?.key || "critical";
+    setExpandedIssueGroups({ critical: first === "critical", medium: first === "medium",
+      light: first === "light", good: first === "good" });
+  }, [review?.reviewId]);
+
+  useEffect(() => {
+    if (!activeIssue) return;
+    const key = issueGroupKey(activeIssue);
+    setExpandedIssueGroups((current) => current[key] ? current : { ...current, [key]: true });
+  }, [activeIssue?.id]);
   const estimatedStageWidth = Math.max(1, (drawingViewportWidth || 800) * drawingZoom / 100);
   const estimatedStageHeight = imageSize
     ? estimatedStageWidth * imageSize.height / imageSize.width
@@ -606,7 +762,7 @@ export default function Home() {
         panel.scrollTo({ top: Math.max(0, panel.scrollTop + cardBox.top - panelBox.top - 72), behavior: "smooth" });
       }
     }
-  }, [activeId, drawingZoom]);
+  }, [activeId, drawingZoom, expandedIssueGroups]);
 
   useEffect(() => {
     const viewport = drawingViewportRef.current;
@@ -632,6 +788,96 @@ export default function Home() {
     setDrawingZoom(nextZoom);
   }
 
+  function focusIssueOnDrawing(issue: ReviewItem) {
+    setExpandedIssueGroups((current) => ({ ...current, [issueGroupKey(issue)]: true }));
+    setPickingIssueId("");
+    setPickingFeatureKey("");
+    setActiveId(issue.id);
+    window.requestAnimationFrame(() => {
+      canvasCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.requestAnimationFrame(() => {
+        const viewport = drawingViewportRef.current;
+        const stage = viewport?.querySelector<HTMLElement>(".drawing-stage");
+        if (viewport && stage) viewport.scrollTo({
+          left: Math.max(0, stage.offsetWidth * (issue.bbox.x + issue.bbox.w / 2) - viewport.clientWidth / 2),
+          top: Math.max(0, stage.offsetHeight * (issue.bbox.y + issue.bbox.h / 2) - viewport.clientHeight / 2),
+          behavior: "smooth"
+        });
+      });
+    });
+  }
+
+  function editIssueRegion(issue: ReviewItem) {
+    setExpandedIssueGroups((current) => ({ ...current, [issueGroupKey(issue)]: true }));
+    setRegionEditingIssueId(issue.id);
+    regionEditingStartRef.current = { id: issue.id, bbox: issue.bbox };
+    setPickingFeatureKey("");
+    setPickingIssueId("");
+    if (issue.locationPinned) saveIssueRegion(issue, issue.bbox, false, false);
+    if (issue.locationUnresolved) {
+      setActiveId(issue.id);
+      setPickingIssueId(issue.id);
+      window.requestAnimationFrame(() => canvasCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      return;
+    }
+    focusIssueOnDrawing(issue);
+  }
+
+  function handleIssueRegionAction(issue: ReviewItem) {
+    if (regionEditingIssueId !== issue.id) {
+      editIssueRegion(issue);
+      return;
+    }
+    const latestIssue = review?.issues.find((item) => item.id === issue.id) || issue;
+    if (latestIssue.locationUnresolved || pickingIssueId === issue.id) return;
+    const originalBbox = regionEditingStartRef.current?.id === issue.id
+      ? regionEditingStartRef.current.bbox : issue.bbox;
+    const finalizedIssue = { ...latestIssue, locationPinned: false };
+    regionEditingStartRef.current = null;
+    setRegionEditingIssueId("");
+    setPickingIssueId("");
+    void saveIssueFeedback(finalizedIssue, {
+      verdict: "wrong_location",
+      originalBbox,
+      correctedBbox: latestIssue.bbox,
+      note: "使用者完成定位調整。"
+    });
+    void reReviewIssue(finalizedIssue);
+  }
+
+  async function saveIssueFeedback(issue: ReviewItem, feedback: ReviewFeedbackDraft) {
+    if (!review || !feedback.verdict || isStaticDemo) return;
+    setFeedbackDrafts((current) => ({ ...current, [issue.id]: feedback }));
+    setFeedbackSaveStates((current) => ({ ...current, [issue.id]: { status: "saving" } }));
+    try {
+      const response = await fetch("/api/review/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...await reviewApiHeaders() },
+        body: JSON.stringify({
+          reviewId: review.reviewId,
+          drawingId: review.drawingId,
+          questionTitle: review.questionContext?.title || generatedQuestion?.title ||
+            (selectedQuestion ? selectedQuestion.year + " 年 " + selectedQuestion.title : ""),
+          scenario: review.scenario || selectedScenario,
+          issue,
+          feedback
+        })
+      });
+      const payload = await response.json() as { feedback?: FeedbackSaveState["record"]; error?: string };
+      if (!response.ok || !payload.feedback) throw new Error(payload.error || "無法儲存回饋。");
+      setFeedbackSaveStates((current) => ({ ...current, [issue.id]: { status: "saved", record: payload.feedback } }));
+      setKnowledgeStats((current) => current ? { ...current, memoryEntries: (current.memoryEntries || 0) + 1 } : current);
+    } catch (error) {
+      setFeedbackSaveStates((current) => ({ ...current, [issue.id]: { status: "error",
+        message: error instanceof Error ? error.message : "無法儲存回饋。" } }));
+    }
+  }
+
+  function reactToIssue(issue: ReviewItem, verdict: "helpful" | "unhelpful") {
+    const current = feedbackDrafts[issue.id];
+    if (current?.verdict === verdict && feedbackSaveStates[issue.id]?.status === "saved") return;
+    void saveIssueFeedback(issue, { verdict, originalBbox: issue.bbox });
+  }
   function clearSuggestionGraphics() {
     suggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
     suggestionGraphicUrls.current = [];
@@ -785,6 +1031,8 @@ export default function Home() {
     setPickingFeatureKey("");
     setDiscussions({});
     setDiscussionOpenId("");
+    setFeedbackDrafts({});
+    setFeedbackSaveStates({});
     setPersistedReview(null);
     setPersistenceNotice("");
     clearSuggestionGraphics();
@@ -851,6 +1099,8 @@ export default function Home() {
       nextReview = { ...nextReview, scenario: selectedScenario, targetMinutes,
         practiceQuestion: !selectedQuestion && !questionPdf ? generatedQuestion : null };
       setReview(nextReview);
+      setFeedbackDrafts({});
+      setFeedbackSaveStates({});
       setDiscussions({});
       setDiscussionOpenId("");
       setQuestionExpanded(true);
@@ -967,7 +1217,7 @@ export default function Home() {
           nextReview.observations, nextReview.questionContext?.confidence);
       }
       nextReview = { ...nextReview, overallScore: null, scoreStale: true,
-        scoreNote: "局部判讀已更新此項意見。五項分數仍基於原圖，請重新完整審圖後再看總分。" };
+        scoreNote: "局部判讀已更新此項意見；相關題目給分項需重新完整審圖後更新。" };
       setReview(nextReview);
 
       if (liveReviewEnabled && persistedReview?.findingIds[issue.id]) {
@@ -1013,18 +1263,26 @@ export default function Home() {
     }
   }
 
-  function saveIssueRegion(issue: ReviewItem, bbox: ReviewItem["bbox"], pinned = issue.locationPinned === true) {
+  function saveIssueRegion(issue: ReviewItem, bbox: ReviewItem["bbox"], pinned = issue.locationPinned === true,
+    invalidateScore = true) {
     setConfirmedRegions((current) => [...current.filter((region) =>
       region.issueId ? region.issueId !== issue.id : region.title !== issue.title),
       { issueId: issue.id, title: issue.title, featureTag: issue.featureTag, bbox, pinned }]);
-    setReview((current) => current ? { ...current, scoreStale: true, overallScore: null,
+    setReview((current) => current ? { ...current,
+      ...(invalidateScore ? { scoreStale: true, overallScore: null } : {}),
       issues: current.issues.map((item) => item.id === issue.id
         ? { ...item, bbox, locationConfidence: 1, locationConfirmed: true, locationPinned: pinned,
           locationUnresolved: false } : item) } : current);
+    if (invalidateScore) {
+      setFeedbackDrafts((current) => current[issue.id]?.verdict === "wrong_location" ? { ...current,
+        [issue.id]: { ...current[issue.id], originalBbox: current[issue.id].originalBbox || issue.bbox,
+          correctedBbox: bbox } } : current);
+      setFeedbackSaveStates((current) => current[issue.id] ? { ...current, [issue.id]: { status: "idle" } } : current);
+    }
   }
 
   function handleOverlayPointerDown(event: PointerEvent<SVGRectElement>, issue: ReviewItem, mode: "move" | "resize") {
-    if (pickingIssueId || pickingFeatureKey || issue.locationPinned) return;
+    if (regionEditingIssueId !== issue.id || pickingIssueId || pickingFeatureKey) return;
     const svg = event.currentTarget.ownerSVGElement;
     if (!svg) return;
     const viewport = drawingViewportRef.current;
@@ -1073,7 +1331,11 @@ export default function Home() {
     if (drag.frameId !== null) window.cancelAnimationFrame(drag.frameId);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     const issue = review?.issues.find((item) => item.id === drag.id);
-    if (issue) saveIssueRegion(issue, drag.latest);
+    const changed = Math.abs(drag.latest.x - drag.initial.x) > 0.0001 ||
+      Math.abs(drag.latest.y - drag.initial.y) > 0.0001 ||
+      Math.abs(drag.latest.w - drag.initial.w) > 0.0001 ||
+      Math.abs(drag.latest.h - drag.initial.h) > 0.0001;
+    if (issue && changed) saveIssueRegion(issue, drag.latest, false);
     window.setTimeout(() => { suppressOverlayClick.current = false; }, 80);
   }
 
@@ -1124,11 +1386,12 @@ export default function Home() {
       region.issueId ? region.issueId !== issue.id : region.title !== issue.title),
       { issueId: issue.id, title: issue.title, featureTag: issue.featureTag, bbox, pinned: false }];
     setConfirmedRegions(nextRegions);
+    setRegionEditingIssueId(issue.id);
     setReview((current) => current ? { ...current, scoreStale: true, overallScore: null,
       issues: current.issues.map((item) => item.id === issue.id ? { ...corrected, locationPinned: false } : item) } : current);
     setActiveId(issue.id);
     setPickingIssueId("");
-    await reReviewIssue(corrected);
+    setRegionEditingIssueId(issue.id);
   }
 
   return (
@@ -1334,11 +1597,11 @@ export default function Home() {
             onClick={() => void handleReview()}
           >
             {isReviewing
-              ? "正在分主題審圖與評分…"
+              ? "正在分主題審圖並對照題目給分項…"
               : `開始審圖（${getReviewScenario(selectedScenario).label}${selectedModel ? " · " + selectedModel : liveReviewEnabled ? " · 雲端 AI" : ""}）`}
           </button>
           {(isLocalModelReady || liveReviewEnabled) && <p className="data-use-note">開始審圖時，作答圖與選定題目會傳送至已連接的模型；按下修改圖或卡片討論時才會傳送對應局部圖。</p>}
-          {isReviewing && <p className="review-progress-note" role="status">正在依序核對題意與基地、空間層次、動線及環境構造，最後才給出五項暫評。</p>}
+          {isReviewing && <p className="review-progress-note" role="status">正在依序核對題意、圖面與知識證據，最後依本題給分項建立分項評估與意見關聯。</p>}
 
           {reviewError && <p className="error-text">{reviewError}</p>}
           {persistenceNotice && <p className="status-note" role="status">{persistenceNotice}</p>}
@@ -1350,12 +1613,25 @@ export default function Home() {
       </section>
 
       {imageUrl && <>
-      <section className="workspace">
-        <div className="canvas-card">
-          <div className="section-head">
+      <section className="review-workspace-section" aria-labelledby="review-workspace-title">
+        <div className="workspace-intro">
+          <div>
+            <span className="step">03</span>
+            <h2 id="review-workspace-title">審圖工作區</h2>
+            <p>先從右側選擇意見，再到左側核對與調整圖框；圖面和判斷保持在同一個工作脈絡。</p>
+          </div>
+          <ol className="workspace-flow" aria-label="審圖操作順序">
+            <li><span>1</span>選意見</li>
+            <li><span>2</span>調圖框</li>
+            <li><span>3</span>回饋判斷</li>
+          </ol>
+        </div>
+        <div className="workspace">
+        <div className="canvas-card" ref={canvasCardRef}>
+          <div className="section-head workspace-pane-head">
             <div>
-              <span className="step">03</span>
-              <h2>圖面與審查標註</h2>
+              <span className="pane-label">圖面定位</span>
+              <h3>圖面與圖框</h3>
             </div>
             <div className="legend">
               <span><i className="dot high" /> 高風險</span>
@@ -1373,7 +1649,7 @@ export default function Home() {
             <button type="button" onClick={() => changeDrawingZoom(100)}>適合視窗</button>
             <button type="button" disabled={!activeIssue || Boolean(pickingIssueId || pickingFeatureKey)}
               onClick={() => setActiveId("")}>顯示全部框</button>
-            <small>選取意見會聚焦單一圖框；拖曳移動，右下角調整大小。</small>
+            <small>圖框平時鎖定；按意見卡的「定位調整圖框」後才可移動，再按一次完成並重判。</small>
           </div>
 
           <div className="drawing-viewport" ref={drawingViewportRef}>
@@ -1403,7 +1679,7 @@ export default function Home() {
                     onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}
                     onClick={(event) => void handleImagePositionClick(event)}>
                     <rect x="0" y="0" width="100" height="100" fill="transparent" pointerEvents="all" />
-                    {issues.map((issue, index) => {
+                    {orderedIssues.map((issue) => {
                       if (issue.locationUnresolved) return null;
                       const active = issue.id === activeId;
                       const hiddenBySelection = Boolean(activeIssue && !active);
@@ -1423,7 +1699,7 @@ export default function Home() {
                           pointerEvents={hiddenBySelection || pickingIssueId || pickingFeatureKey ? "none" : undefined}
                           onClick={() => { if (!pickingIssueId && !pickingFeatureKey) setActiveId(issue.id); }}
                         >
-                          <title>{issue.title}{issue.locationPinned ? "，位置已固定" : "，可拖曳調整"}</title>
+                          <title>{issue.title}{regionEditingIssueId === issue.id ? "，定位調整中" : "，需先啟動定位調整圖框"}</title>
                           <rect
                             x={svgValue(issue.bbox.x)}
                             y={svgValue(issue.bbox.y)}
@@ -1433,7 +1709,7 @@ export default function Home() {
                             className={`issue-box ${cls} ${issue.kind === "clarity_request" ? "clarity-box" : ""} ${issue.locationPinned ? "pinned-box" : ""}`}
                             onPointerDown={(event) => handleOverlayPointerDown(event, issue, "move")}
                           />
-                          {active && !issue.locationPinned && !pickingIssueId && !pickingFeatureKey && <rect
+                          {active && regionEditingIssueId === issue.id && !pickingIssueId && !pickingFeatureKey && <rect
                             x={svgValue(issue.bbox.x + issue.bbox.w) - resizeHandleWidth / 2}
                             y={svgValue(issue.bbox.y + issue.bbox.h) - resizeHandleHeight / 2}
                             width={resizeHandleWidth} height={resizeHandleHeight}
@@ -1451,7 +1727,7 @@ export default function Home() {
                             y={svgValue(issue.bbox.y) + 2.8}
                             className="issue-number"
                           >
-                            {index + 1}
+                            {issueNumberById.get(issue.id)}
                           </text>
 
                           {issue.redline?.type === "line" && (
@@ -1500,22 +1776,35 @@ export default function Home() {
 
           {activeIssue && (
             <div className="active-region-note">
-              <strong>目前選取：</strong>
-              <span>{activeIssue.title}</span>
-              <small>模型信心 {Math.round(activeIssue.confidence * 100)}%</small>
+              <div className="active-region-copy">
+                <small>{regionEditingIssueId === activeIssue.id
+                  ? "定位調整中 · 定位信心 " + Math.round((activeIssue.locationConfidence ?? 0.5) * 100) + "%"
+                  : "定位信心 " + Math.round((activeIssue.locationConfidence ?? 0.5) * 100) + "%"}</small>
+                <strong>{activeIssue.title}</strong>
+                <span>{regionEditingIssueId === activeIssue.id
+                  ? activeIssue.locationUnresolved
+                    ? "請在圖面點一下正確位置，接著調整圖框範圍。"
+                    : "可拖曳圖框移動或調整右下角；完成後再按卡片按鈕啟動局部重判。"
+                  : activeIssue.locationUnresolved
+                    ? "位置待確認；請在意見卡按「定位調整圖框」開始標記。"
+                    : "圖框目前鎖定。要調整位置，請先在意見卡按「定位調整圖框」。"}</span>
+              </div>
             </div>
           )}
           {(pickingIssueId || pickingFeatureKey) && <div className="location-pick-hint" role="status">
-            點一下圖面中{pickingFeatureKey ? "要素" : "這項意見"}的正確位置，平台會重新判讀。
-            <button type="button" onClick={() => { setPickingIssueId(""); setPickingFeatureKey(""); }}>取消</button>
+            點一下圖面中{pickingFeatureKey ? "要素" : "這項意見"}的正確位置。
+            <button type="button" onClick={() => {
+              setPickingIssueId(""); setPickingFeatureKey(""); setRegionEditingIssueId("");
+              regionEditingStartRef.current = null;
+            }}>取消</button>
           </div>}
         </div>
 
         <aside className="review-panel" ref={reviewPanelRef}>
-          <div className="section-head">
+          <div className="section-head workspace-pane-head">
             <div>
-              <span className="step">04</span>
-              <h2>審圖意見</h2>
+              <span className="pane-label">依優先順序</span>
+              <h3>審圖意見</h3>
             </div>
             <div className="review-meta-pills">
               {review?.scenario && (
@@ -1532,9 +1821,15 @@ export default function Home() {
             </div>
           </div>
 
+          {review && <details className="review-support">
+            <summary>
+              <span><strong>審圖依據與辨識資料</strong><small>題目、知識來源、圖面辨識與審查範圍</small></span>
+            </summary>
+            <div className="review-support-body">
           {knowledgeStats && <p className="knowledge-status">
             私有教材索引：{knowledgeStats.sourceCount} 份來源 · {knowledgeStats.textChunks} 段文字 · {knowledgeStats.imagePages} 筆圖頁
             {knowledgeStats.imageEmbeddings > 0 && ` · ${knowledgeStats.imageEmbeddings} 筆圖片向量`}
+            {Boolean(knowledgeStats.memoryEntries) && ` · ${knowledgeStats.memoryEntries} 筆人工回饋記憶`}
             <span>教材摘錄尚未人工審定</span>
           </p>}
 
@@ -1548,6 +1843,13 @@ export default function Home() {
               {!!review.questionContext.siteConditions.length && <p><strong>基地條件</strong>　{review.questionContext.siteConditions.join("；")}</p>}
               {!!review.questionContext.drawingRequirements.length && <p><strong>圖面要求</strong>　{review.questionContext.drawingRequirements.join("；")}</p>}
               {!!review.questionContext.constraints.length && <p><strong>限制條件</strong>　{review.questionContext.constraints.join("；")}</p>}
+              {!!review.questionContext.scoringItems?.length && <div className="question-rubric-preview">
+                <strong>題目給分項</strong>
+                <ul>{review.questionContext.scoringItems.map((item) => <li key={item.key}>
+                  <span>{item.section ? `${item.section} · ` : ""}{item.label}</span>
+                  <b>{item.maxScore === null ? "未載明配分" : `${item.maxScore} 分`}</b>
+                </li>)}</ul>
+              </div>}
               {!!review.questionContext.uncertainties.length && <p><strong>待核對</strong>　{review.questionContext.uncertainties.join("；")}</p>}
               {review.questionContext.sourceUrl && <a href={review.questionContext.sourceUrl} target="_blank" rel="noopener noreferrer">開啟原始題目 PDF</a>}
             </details>
@@ -1573,7 +1875,7 @@ export default function Home() {
                       </select>
                       <button className="secondary-action" type="button" onClick={() => {
                         setActiveId(""); setPickingIssueId(""); setPickingFeatureKey(key as keyof ObservationOverrides);
-                      }}>{(check.locationConfidence ?? 0.4) < 0.7 ? "確認圖面位置" : "更正圖面位置"}</button>
+                      }}>在圖面標記</button>
                     </div>
                   </label>
                 ))}
@@ -1603,15 +1905,35 @@ export default function Home() {
               <p>{item.summary}</p>
             </div>)}</div>
           </details>}
+            </div>
+          </details>}
 
-          {review && <p className="confidence-explain">信心數值是模型對證據與落點的估計。位置不準時可直接在圖面更正，系統會重新判讀。</p>}
+          {review && <div className="review-guidance">
+            <strong>先處理最嚴重的意見</strong>
+            <span>圖框預設鎖定。按「定位調整圖框」開始移動或縮放，再按一次完成定位並啟動此區重判。</span>
+          </div>}
 
           <div className="issue-list">
             {review ? (
-              issues.map((issue, index) => {
+              issueGroupDefinitions.map((group) => {
+                const rows = groupedIssues[group.key];
+                if (!rows.length) return null;
+                return <details key={group.key} className={`issue-severity-group group-${group.key}`}
+                  open={expandedIssueGroups[group.key]} onToggle={(event) => {
+                    const open = event.currentTarget.open;
+                    setExpandedIssueGroups((current) => current[group.key] === open ? current : { ...current, [group.key]: open });
+                  }}>
+                  <summary>
+                    <span><strong>{group.label}</strong><small>{group.description}</small></span>
+                    <b>{rows.length} 項</b>
+                  </summary>
+                  <div className="issue-group-cards">
+                  {rows.map((issue) => {
+                const index = (issueNumberById.get(issue.id) || 1) - 1;
                 const supplement = supplements[issue.id];
                 const graphic = suggestionGraphics[issue.id];
                 const aiGraphic = aiSuggestionGraphics[issue.id];
+                const linkedDimensions = displayDimensions.filter((dimension) => issue.rubricRefs?.includes(dimension.key));
 
                 return (
                   <article
@@ -1625,43 +1947,51 @@ export default function Home() {
                         {issue.kind === "strength" ? "值得保留" : severityLabels[issue.severity]}
                       </span>
                       <span className="category">{issue.category}</span>
-                      <b>
-                        {issue.scoreImpact === null
-                          ? `${Math.round(issue.confidence * 100)}% 信心`
-                          : `${issue.scoreImpact} 分`}
-                      </b>
+                      <b>{Math.round((issue.evidenceConfidence ?? issue.confidence) * 100)}% 判斷信心</b>
                     </div>
 
                     <h3>{index + 1}. {issue.title}</h3>
-                    <p>{issue.description}</p>
+                    <div className="issue-rubric-links" aria-label="關聯給分項">
+                      <span>關聯給分項</span>
+                      {linkedDimensions.length ? linkedDimensions.map((dimension) =>
+                        <b key={dimension.key}>{dimension.section ? `${dimension.section} · ` : ""}{dimension.label}</b>)
+                        : <em>尚未建立直接關聯</em>}
+                    </div>
+                    <ol className="issue-narrative">
+                      <li><span>1</span><div><strong>看到什麼（圖面）</strong>
+                        <p>{issue.evidence || "未提供獨立圖面線索，請將這項意見視為待核對。"}</p></div></li>
+                      <li><span>2</span><div><strong>依據什麼（標準）</strong>
+                        <p>{issue.criterion || "未提供明確審查標準。"}</p>
+                        {!!issue.sourceRefs?.length && <small>知識來源：{issue.sourceRefs.join("、")}</small>}
+                      </div></li>
+                      <li><span>3</span><div><strong>為何判斷（什麼問題）</strong><p>{issue.description}</p></div></li>
+                      <li><span>4</span><div><strong>怎麼改（建議）</strong><p>{issue.suggestion}</p></div></li>
+                    </ol>
                     <div className="confidence-row">
                       <span>判斷信心 {Math.round((issue.evidenceConfidence ?? issue.confidence) * 100)}%</span>
                       <span>{issue.locationUnresolved ? "位置待確認" : `定位信心 ${Math.round((issue.locationConfidence ?? 0.5) * 100)}%`}</span>
                       {issue.locationConfirmed && <span>位置已由你確認</span>}
                       {issue.locationPinned && <span>📌 已固定</span>}
                     </div>
-                    <div className="region-actions"><button className="secondary-action" type="button" onClick={(event) => {
-                        event.stopPropagation(); setActiveId(issue.id); setPickingFeatureKey(""); setPickingIssueId(issue.id);
-                      }}>{issue.locationUnresolved ? "在圖面指定位置" : !issue.locationConfirmed && (issue.locationConfidence ?? 0.5) < 0.7 ? "在圖面確認位置" : "更正圖面位置"}</button>
-                      <button className="secondary-action" type="button" disabled={isReviewing || supplement?.status === "reviewing"} onClick={(event) => {
-                        event.stopPropagation(); void reReviewIssue(issue);
-                      }}>重審此處</button>
-                      <button className="secondary-action" type="button" disabled={issue.locationUnresolved} onClick={(event) => {
-                        event.stopPropagation(); saveIssueRegion(issue, issue.bbox, !issue.locationPinned);
-                      }}>{issue.locationPinned ? "解除圖釘" : "圖釘固定"}</button>
+                    <div className="region-actions">
+                      <button className="focus-drawing-action" type="button"
+                        disabled={isReviewing || supplement?.status === "reviewing" ||
+                          regionEditingIssueId === issue.id && issue.locationUnresolved}
+                        onClick={(event) => {
+                          event.stopPropagation(); handleIssueRegionAction(issue);
+                        }}>{regionEditingIssueId === issue.id
+                          ? issue.locationUnresolved ? "先在圖面選位置" : "完成定位並重新判讀"
+                          : "定位調整圖框"}</button>
                       <button className="secondary-action discussion-trigger" type="button"
                         aria-expanded={discussionOpenId === issue.id}
                         onClick={(event) => { event.stopPropagation(); setActiveId(issue.id);
                           setDiscussionOpenId((current) => current === issue.id ? "" : issue.id); }}>
-                        討論此意見{discussions[issue.id]?.length ? ` · ${Math.ceil(discussions[issue.id].length / 2)}` : ""}
+                          討論{discussions[issue.id]?.length ? ` · ${Math.ceil(discussions[issue.id].length / 2)}` : ""}
                       </button></div>
-                    {(issue.evidence || issue.criterion || issue.sourceRefs?.length) && (
-                      <div className="issue-evidence">
-                        {issue.evidence && <p><strong>圖面證據：</strong>{issue.evidence}</p>}
-                        {issue.criterion && <p><strong>審查要點：</strong>{issue.criterion}</p>}
-                        {!!issue.sourceRefs?.length && <p><strong>知識依據：</strong>{issue.sourceRefs.join("、")}</p>}
-                      </div>
-                    )}
+                    <IssueKnowledgePanel issue={issue} knowledge={review.retrievedKnowledge || []} />
+                    <ReviewFeedbackPanel issue={issue} draft={feedbackDrafts[issue.id] || { verdict: "" }}
+                      saveState={feedbackSaveStates[issue.id]}
+                      staticDemo={isStaticDemo} onReact={(verdict) => reactToIssue(issue, verdict)} />
 
                     {discussionOpenId === issue.id && <section className="issue-discussion"
                       aria-label={`${issue.title}的討論`} onClick={(event) => event.stopPropagation()}>
@@ -1749,17 +2079,9 @@ export default function Home() {
                         )}
                       </div>
                     ) : (
-                      <>
-                        <div className="suggestion">
-                          <strong>{issue.kind === "strength" ? "值得繼續保持" : "修改方向"}</strong>
-                          <span>{issue.suggestion}</span>
-                        </div>
-                        {supplement?.status === "resolved" && (
-                          <div className="resolved-note">
-                            ✓ 此意見已由局部補圖重新判讀
-                          </div>
-                        )}
-                      </>
+                      supplement?.status === "resolved" ? <div className="resolved-note">
+                        ✓ 此意見已由局部補圖重新判讀
+                      </div> : null
                     )}
                     {issue.kind === "issue" && (
                       <div
@@ -1798,7 +2120,7 @@ export default function Home() {
                         )}
                         <p className="suggestion-graphic-note">
                           {(issue.locationUnresolved || !issue.locationConfirmed && (issue.locationConfidence ?? 0.5) < 0.7)
-                            ? "請先在圖面確認位置，再生成修改圖。"
+                            ? "請先定位圖框；若目前位置正確可直接在圖面下方確認。"
                             : "按下後讀取這個局部圖。能精準定位時產生 SVG；複雜圖形會改用已連線的圖片編修模型。"}
                         </p>
                         {graphic?.status === "error" && (
@@ -1854,6 +2176,9 @@ export default function Home() {
                     )}
                   </article>
                 );
+              })}
+                  </div>
+                </details>;
               })
             ) : (
               <div className="panel-empty">
@@ -1862,57 +2187,80 @@ export default function Home() {
             )}
           </div>
         </aside>
+        </div>
       </section>
 
 
       <section className="score-card score-summary" aria-labelledby="score-title">
         <div className="section-head">
           <div>
-            <span className="step">05</span>
+            <span className="step">04</span>
             <h2 id="score-title">結構化評分</h2>
           </div>
-          <span className="issue-count">{review?.scoreStale ? "等待重新評分" : review ? "本次審圖" : "等待審圖"}</span>
+          <span className="issue-count">{review?.scoreStale ? "等待重新評分" : review?.scoringMode
+            ? scoringModeLabels[review.scoringMode] : review ? "本次審圖" : "等待審圖"}</span>
         </div>
         <div className="score-summary-body">
-          <div className="score-big">
-            <strong>{review?.overallScore ?? "--"}</strong>
-            <span>/ 100</span>
+          <div className={`score-big ${review && review.overallScore === null ? "is-qualitative" : ""}`}>
+            <strong>{review?.scoreStale ? "待更新" : review?.overallScore ?? (review ? "不加總" : "--")}</strong>
+            <span>{!review ? "等待審圖" : review.overallScore !== null && review.overallMaxScore
+              ? `/ ${review.overallMaxScore} 題目配分` : "依分項達成狀態"}</span>
           </div>
           {review?.scoreNote && <p className="score-note">{review.scoreNote}</p>}
           {review?.scoreStale && <button className="secondary-action rescore-action" type="button" disabled={isReviewing} onClick={() => void handleReview()}>
-            {isReviewing ? "正在重新審圖…" : "重新完整審圖並更新分數"}
+            {isReviewing ? "正在重新審圖…" : "重新完整審圖並更新給分項"}
           </button>}
 
           <div className="dimension-list">
             {displayDimensions.map((dimension) => {
-              const hasScore = !review?.scoreStale &&
-                dimension.score !== null && dimension.maxScore !== null;
+              const scoreValue = !review?.scoreStale && typeof dimension.score === "number" ? dimension.score : null;
+              const maxValue = typeof dimension.maxScore === "number" ? dimension.maxScore : null;
+              const hasScore = scoreValue !== null && maxValue !== null;
+              const assessment = review?.scoreStale ? "unverified" : dimension.assessment || "unverified";
+              const relatedIssues = (dimension.relatedIssueIds || []).flatMap((id) => {
+                const issue = issues.find((item) => item.id === id);
+                return issue ? [issue] : [];
+              });
 
               return (
-                <div key={dimension.label} className="dimension-row">
-                  <span>{dimension.label}</span>
-                  <div className="meter">
-                    <i
-                      style={{
-                        width: hasScore
-                          ? `${(dimension.score / dimension.maxScore) * 100}%`
-                          : "0%"
-                      }}
-                    />
+                <article key={dimension.key} className="dimension-row">
+                  <div className="dimension-heading">
+                    {dimension.section && <small>{dimension.section}</small>}
+                    <strong>{dimension.label}</strong>
                   </div>
-                  <b>
-                    {hasScore
-                      ? `${dimension.score}/${dimension.maxScore}`
-                      : "--"}
-                  </b>
-                  {review && <small className="dimension-detail">
-                    證據信心 {Math.round((dimension.evidenceConfidence ?? dimension.confidence) * 100)}% · {dimension.rationale || "理由待補"}
-                    {dimension.evidence ? ` · 圖面證據：${dimension.evidence}` : " · 圖面證據不足"}
-                    {dimension.sourceRefs?.length ? ` · 知識：${dimension.sourceRefs.join("、")}` : ""}
-                  </small>}
-                </div>
+                  <div className="dimension-result">
+                    {maxValue !== null && <div className="meter" aria-hidden="true"><i style={{
+                      width: hasScore ? `${(scoreValue / maxValue) * 100}%` : "0%"
+                    }} /></div>}
+                    <b>{hasScore ? `${scoreValue}/${maxValue}` : maxValue !== null
+                      ? `待評 / ${maxValue}` : assessmentLabels[assessment]}</b>
+                    {hasScore && <span className={`assessment assessment-${assessment}`}>{assessmentLabels[assessment]}</span>}
+                  </div>
+                  <div className="dimension-detail">
+                    {dimension.criterion && <p><strong>題目標準</strong>{dimension.criterion}</p>}
+                    <p><strong>判斷理由</strong>{dimension.rationale || "理由待補"}</p>
+                    <p><strong>圖面證據</strong>{dimension.evidence || "目前證據不足"}</p>
+                    <small>證據信心 {Math.round((dimension.evidenceConfidence ?? dimension.confidence) * 100)}%
+                      {dimension.sourceRefs?.length ? ` · 知識：${dimension.sourceRefs.join("、")}` : ""}</small>
+                  </div>
+                  <div className="dimension-findings">
+                    <span>關聯審圖意見</span>
+                    {relatedIssues.length ? <div>{relatedIssues.map((issue) => <button key={issue.id} type="button"
+                      onClick={() => {
+                        setExpandedIssueGroups((current) => ({ ...current, [issueGroupKey(issue)]: true }));
+                        setActiveId(issue.id);
+                        window.requestAnimationFrame(() => {
+                          const card = Array.from(document.querySelectorAll<HTMLElement>("[data-review-item-id]"))
+                            .find((element) => element.dataset.reviewItemId === issue.id);
+                          card?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        });
+                      }}>#{issueNumberById.get(issue.id) || "–"} {issue.title}</button>)}</div>
+                      : <em>目前沒有直接關聯的意見</em>}
+                  </div>
+                </article>
               );
             })}
+            {!displayDimensions.length && <div className="score-empty">完成審圖後，這裡會依題目實際給分項顯示；沒有明確配分時不會自行補成百分制。</div>}
           </div>
         </div>
       </section>

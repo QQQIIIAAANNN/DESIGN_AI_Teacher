@@ -42,6 +42,43 @@ export type RetrievedKnowledge = {
   knowledgeType: string;
   statement: string;
   imageRefs?: string[];
+  sourcePath?: string;
+  page?: number;
+  buildingTypes?: string[];
+  topicTags?: string[];
+  sourceCategory?: string;
+  visualType?: string;
+  visualReviewStatus?: string;
+};
+
+export type ReviewFeedbackVerdict =
+  | "correct"
+  | "partially_correct"
+  | "misjudged"
+  | "wrong_location"
+  | "helpful"
+  | "unhelpful";
+
+export type ReviewMisjudgmentType =
+  | "observation_error"
+  | "criterion_mismatch"
+  | "reasoning_error"
+  | "severity_error"
+  | "missing_context"
+  | "other";
+
+export type ReviewFeedbackDraft = {
+  verdict: ReviewFeedbackVerdict | "";
+  misjudgmentType?: ReviewMisjudgmentType | "";
+  note?: string;
+  originalBbox?: NormalizedBBox;
+  correctedBbox?: NormalizedBBox;
+};
+
+export type ReviewFeedbackRecord = {
+  id: string;
+  savedAt: string;
+  memoryPath: string;
 };
 
 export type NormalizedBBox = {
@@ -96,17 +133,43 @@ export type ReviewItem = {
   evidence?: string;
   criterion?: string;
   sourceRefs?: string[];
+  /** Question-rubric keys affected by this finding. This is not a point deduction. */
+  rubricRefs?: string[];
   featureTag?: CriticalFeature;
   bbox: NormalizedBBox;
   redline?: RedlinePrimitive;
   cropRequest?: CropRequest;
 };
 
+export type ReviewAssessment =
+  | "excellent"
+  | "good"
+  | "partial"
+  | "insufficient"
+  | "unverified";
+
+export type ReviewRubricSource =
+  | "question_explicit"
+  | "question_deliverable"
+  | "practice_question"
+  | "platform_reference";
+
+export type ReviewScoringMode =
+  | "question_points"
+  | "question_mixed"
+  | "question_criteria"
+  | "platform_reference";
+
 export type ReviewDimension = {
   key: string;
   label: string;
-  score: number;
-  maxScore: number;
+  section?: string;
+  criterion?: string;
+  score: number | null;
+  maxScore: number | null;
+  assessment?: ReviewAssessment;
+  rubricSource?: ReviewRubricSource;
+  relatedIssueIds?: string[];
   confidence: number;
   evidenceConfidence?: number;
   rationale?: string;
@@ -134,6 +197,8 @@ export type DrawingReview = {
   reviewId: string;
   drawingId: string;
   overallScore: number | null;
+  overallMaxScore?: number | null;
+  scoringMode?: ReviewScoringMode;
   dimensions: ReviewDimension[];
   issues: ReviewItem[];
   coverage?: ReviewCoverage[];

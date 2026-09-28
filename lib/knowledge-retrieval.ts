@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { RetrievedKnowledge, ReviewObservation } from "@/lib/review-schema";
 import { searchPrivateKnowledge } from "@/lib/private-knowledge";
+import { searchReviewMemory } from "@/lib/review-memory";
 
 export type KnowledgeUnit = RetrievedKnowledge & {
   examType: string;
@@ -47,12 +48,36 @@ export async function retrieveKnowledge(query: string, examType: "design" | "sit
   });
   const core = anchors.flatMap((id) => units.find((unit) => unit.id === id) || []);
   const related = scored.sort((a, b) => b.score - a.score || a.unit.id.localeCompare(b.unit.id)).map(({ unit }) => unit);
-  const privateMatches = (await searchPrivateKnowledge(query, Math.max(3, Math.floor(limit / 2)), focusKeys)).map((item): KnowledgeUnit => ({
+  const [privateRows, memoryRows] = await Promise.all([
+    searchPrivateKnowledge(query, Math.max(3, Math.floor(limit / 2)), focusKeys),
+    searchReviewMemory(query, Math.max(2, Math.floor(limit / 4)))
+  ]);
+  const privateMatches = privateRows.map((item): KnowledgeUnit => ({
     ...item, examType: "both", topics: [], conditions: ["課程資料摘錄，尚未人工確認為評分規則"],
     exceptions: [], evidenceTargets: [], remediation: []
   }));
-  const publicQuota = privateMatches.length ? Math.max(core.length, limit - privateMatches.length) : limit;
-  return [...core, ...related].slice(0, publicQuota).concat(privateMatches).slice(0, limit);
+  const memoryMatches = memoryRows.map((item): KnowledgeUnit => ({
+    ...item, examType: "both", topics: [],
+    conditions: ["人工對過往意見的修正訊號，僅在當次圖面情境與證據相似時參考"],
+    exceptions: ["不可當作法規、題目條件或可取代當次圖面的事實"],
+    evidenceTargets: ["過往誤判類型", "使用者修正的位置或上下文"],
+    remediation: ["重新檢查當次圖面證據，並避免重複相同誤判"]
+  }));
+  const remaining = Math.max(0, limit - core.length);
+  const memoryQuota = Math.min(memoryMatches.length, Math.max(2, Math.floor(remaining * 0.2)));
+  const privateQuota = Math.min(privateMatches.length, Math.max(3, Math.floor(remaining * 0.4)));
+  const canonicalQuota = Math.max(0, remaining - memoryQuota - privateQuota);
+  const preferred = [
+    ...core,
+    ...memoryMatches.slice(0, memoryQuota),
+    ...related.slice(0, canonicalQuota),
+    ...privateMatches.slice(0, privateQuota),
+    ...memoryMatches,
+    ...related,
+    ...privateMatches
+  ];
+  const seen = new Set<string>();
+  return preferred.filter((unit) => !seen.has(unit.id) && Boolean(seen.add(unit.id))).slice(0, limit);
 }
 
 export function knowledgeQuery(observation: ReviewObservation, questionTitle: string, brief: string) {
@@ -65,5 +90,7 @@ export function knowledgePrompt(units: KnowledgeUnit[]) {
   return units.map((unit) => JSON.stringify({ id: unit.id, source: unit.sourceTitle, sourceType: unit.sourceType,
     knowledgeType: unit.knowledgeType, rule: unit.statement, conditions: unit.conditions,
     exceptions: unit.exceptions, evidenceTargets: unit.evidenceTargets, remediation: unit.remediation,
-    imageRefs: unit.imageRefs })).join("\n");
+    imageRefs: unit.imageRefs,
+    authority: unit.sourceType === "platform_policy" ? "platform_canonical"
+      : unit.sourceType === "user_feedback_memory" ? "human_correction_signal" : "reference_only" })).join("\n");
 }
