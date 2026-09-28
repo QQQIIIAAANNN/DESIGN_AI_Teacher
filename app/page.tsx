@@ -156,6 +156,20 @@ function svgValue(value: number) {
   return value * 100;
 }
 
+function normalizedSvgPoint(svg: SVGSVGElement, clientX: number, clientY: number) {
+  const transform = svg.getScreenCTM();
+  if (transform) {
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const local = point.matrixTransform(transform.inverse());
+    return { x: Math.max(0, Math.min(1, local.x / 100)), y: Math.max(0, Math.min(1, local.y / 100)) };
+  }
+  const bounds = svg.getBoundingClientRect();
+  return { x: Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width)),
+    y: Math.max(0, Math.min(1, (clientY - bounds.top) / bounds.height)) };
+}
+
 export default function Home() {
   const [imageUrl, setImageUrl] = useState("");
   const [drawingFile, setDrawingFile] = useState<File | null>(null);
@@ -164,6 +178,7 @@ export default function Home() {
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [drawingViewportWidth, setDrawingViewportWidth] = useState(0);
   const [selectedQuestion, setSelectedQuestion] = useState<ProjectQuestion | null>(null);
   const [questionPdf, setQuestionPdf] = useState<File | null>(null);
   const [observationOverrides, setObservationOverrides] = useState<ObservationOverrides>({});
@@ -221,8 +236,10 @@ export default function Home() {
   const drawingViewportRef = useRef<HTMLDivElement>(null);
   const reviewPanelRef = useRef<HTMLElement>(null);
   const overlayDrag = useRef<{ id: string; mode: "move" | "resize"; startX: number; startY: number;
-    initial: ReviewItem["bbox"]; latest: ReviewItem["bbox"] } | null>(null);
+    initial: ReviewItem["bbox"]; latest: ReviewItem["bbox"]; frameId: number | null } | null>(null);
   const suppressOverlayClick = useRef(false);
+  const skipCanvasFocusIssueId = useRef("");
+  const pendingZoomAnchor = useRef<{ x: number; y: number } | null>(null);
   const generatedSiteSvg = useMemo(() => generatedQuestion?.sitePlan
     ? renderPracticeSiteSvg(generatedQuestion.sitePlan) : "", [generatedQuestion]);
   const generatedSiteUrl = useMemo(() => generatedSiteSvg
@@ -554,11 +571,24 @@ export default function Home() {
     () => issues.find((issue) => issue.id === activeId),
     [activeId, issues]
   );
+  const estimatedStageWidth = Math.max(1, (drawingViewportWidth || 800) * drawingZoom / 100);
+  const estimatedStageHeight = imageSize
+    ? estimatedStageWidth * imageSize.height / imageSize.width
+    : estimatedStageWidth;
+  const resizeHandleWidth = Math.max(0.6, Math.min(8, 1800 / estimatedStageWidth));
+  const resizeHandleHeight = Math.max(0.6, Math.min(8, 1800 / estimatedStageHeight));
 
   useEffect(() => {
     const viewport = drawingViewportRef.current;
     const stage = viewport?.querySelector<HTMLElement>(".drawing-stage");
-    if (viewport && stage && activeIssue) {
+    const skipCanvasFocus = skipCanvasFocusIssueId.current === activeId;
+    if (skipCanvasFocus) skipCanvasFocusIssueId.current = "";
+    if (viewport && stage && pendingZoomAnchor.current) {
+      const anchor = pendingZoomAnchor.current;
+      pendingZoomAnchor.current = null;
+      viewport.scrollTo({ left: Math.max(0, stage.offsetWidth * anchor.x - viewport.clientWidth / 2),
+        top: Math.max(0, stage.offsetHeight * anchor.y - viewport.clientHeight / 2), behavior: "auto" });
+    } else if (viewport && stage && activeIssue && !skipCanvasFocus) {
       viewport.scrollTo({ left: Math.max(0, stage.offsetWidth * (activeIssue.bbox.x + activeIssue.bbox.w / 2) - viewport.clientWidth / 2),
         top: Math.max(0, stage.offsetHeight * (activeIssue.bbox.y + activeIssue.bbox.h / 2) - viewport.clientHeight / 2), behavior: "smooth" });
     }
@@ -577,6 +607,30 @@ export default function Home() {
       }
     }
   }, [activeId, drawingZoom]);
+
+  useEffect(() => {
+    const viewport = drawingViewportRef.current;
+    if (!viewport) return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) setDrawingViewportWidth(Math.round(width));
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [imageUrl]);
+
+  function changeDrawingZoom(nextZoom: number) {
+    if (nextZoom === drawingZoom) return;
+    const viewport = drawingViewportRef.current;
+    const stage = viewport?.querySelector<HTMLElement>(".drawing-stage");
+    if (viewport && stage && stage.offsetWidth > 0 && stage.offsetHeight > 0) {
+      pendingZoomAnchor.current = {
+        x: Math.max(0, Math.min(1, (viewport.scrollLeft + viewport.clientWidth / 2) / stage.offsetWidth)),
+        y: Math.max(0, Math.min(1, (viewport.scrollTop + viewport.clientHeight / 2) / stage.offsetHeight))
+      };
+    }
+    setDrawingZoom(nextZoom);
+  }
 
   function clearSuggestionGraphics() {
     suggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
@@ -973,13 +1027,17 @@ export default function Home() {
     if (pickingIssueId || pickingFeatureKey || issue.locationPinned) return;
     const svg = event.currentTarget.ownerSVGElement;
     if (!svg) return;
-    const bounds = svg.getBoundingClientRect();
+    const viewport = drawingViewportRef.current;
+    if (viewport) viewport.scrollTo({ left: viewport.scrollLeft, top: viewport.scrollTop, behavior: "auto" });
+    window.scrollTo({ left: window.scrollX, top: window.scrollY, behavior: "auto" });
+    const point = normalizedSvgPoint(svg, event.clientX, event.clientY);
     overlayDrag.current = { id: issue.id, mode,
-      startX: (event.clientX - bounds.left) / bounds.width,
-      startY: (event.clientY - bounds.top) / bounds.height,
-      initial: issue.bbox, latest: issue.bbox };
+      startX: point.x,
+      startY: point.y,
+      initial: issue.bbox, latest: issue.bbox, frameId: null };
     suppressOverlayClick.current = true;
     svg.setPointerCapture(event.pointerId);
+    if (activeId !== issue.id) skipCanvasFocusIssueId.current = issue.id;
     setActiveId(issue.id);
     event.preventDefault();
     event.stopPropagation();
@@ -988,9 +1046,9 @@ export default function Home() {
   function handleOverlayPointerMove(event: PointerEvent<SVGSVGElement>) {
     const drag = overlayDrag.current;
     if (!drag) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const dx = (event.clientX - bounds.left) / bounds.width - drag.startX;
-    const dy = (event.clientY - bounds.top) / bounds.height - drag.startY;
+    const point = normalizedSvgPoint(event.currentTarget, event.clientX, event.clientY);
+    const dx = point.x - drag.startX;
+    const dy = point.y - drag.startY;
     const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
     const bbox = drag.mode === "move"
       ? { ...drag.initial, x: clamp(drag.initial.x + dx, 0, 1 - drag.initial.w),
@@ -998,18 +1056,25 @@ export default function Home() {
       : { ...drag.initial, w: clamp(drag.initial.w + dx, 0.02, 1 - drag.initial.x),
         h: clamp(drag.initial.h + dy, 0.02, 1 - drag.initial.y) };
     drag.latest = bbox;
-    setReview((current) => current ? { ...current, issues: current.issues.map((item) =>
-      item.id === drag.id ? { ...item, bbox } : item) } : current);
+    if (drag.frameId === null) {
+      drag.frameId = window.requestAnimationFrame(() => {
+        drag.frameId = null;
+        const latest = drag.latest;
+        setReview((current) => current ? { ...current, issues: current.issues.map((item) =>
+          item.id === drag.id ? { ...item, bbox: latest } : item) } : current);
+      });
+    }
   }
 
   function handleOverlayPointerUp(event: PointerEvent<SVGSVGElement>) {
     const drag = overlayDrag.current;
     if (!drag) return;
     overlayDrag.current = null;
+    if (drag.frameId !== null) window.cancelAnimationFrame(drag.frameId);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     const issue = review?.issues.find((item) => item.id === drag.id);
     if (issue) saveIssueRegion(issue, drag.latest);
-    window.setTimeout(() => { suppressOverlayClick.current = false; }, 0);
+    window.setTimeout(() => { suppressOverlayClick.current = false; }, 80);
   }
 
   async function reReviewIssue(issue: ReviewItem) {
@@ -1302,11 +1367,13 @@ export default function Home() {
 
           <div className="drawing-tools" aria-label="圖面縮放與定位">
             <span>圖面縮放</span>
-            <button type="button" aria-label="縮小圖面" disabled={drawingZoom <= 75} onClick={() => setDrawingZoom((value) => Math.max(75, value - 25))}>−</button>
+            <button type="button" aria-label="縮小圖面" disabled={drawingZoom <= 75} onClick={() => changeDrawingZoom(Math.max(75, drawingZoom - 25))}>−</button>
             <output>{drawingZoom}%</output>
-            <button type="button" aria-label="放大圖面" disabled={drawingZoom >= 300} onClick={() => setDrawingZoom((value) => Math.min(300, value + 25))}>＋</button>
-            <button type="button" onClick={() => setDrawingZoom(100)}>適合視窗</button>
-            <small>選取標註後拖曳移動，拖曳右下角調整範圍。</small>
+            <button type="button" aria-label="放大圖面" disabled={drawingZoom >= 300} onClick={() => changeDrawingZoom(Math.min(300, drawingZoom + 25))}>＋</button>
+            <button type="button" onClick={() => changeDrawingZoom(100)}>適合視窗</button>
+            <button type="button" disabled={!activeIssue || Boolean(pickingIssueId || pickingFeatureKey)}
+              onClick={() => setActiveId("")}>顯示全部框</button>
+            <small>選取意見會聚焦單一圖框；拖曳移動，右下角調整大小。</small>
           </div>
 
           <div className="drawing-viewport" ref={drawingViewportRef}>
@@ -1332,13 +1399,14 @@ export default function Home() {
                 />
 
                 {review && (
-                  <svg className={`overlay ${pickingIssueId || pickingFeatureKey ? "is-picking" : ""}`} viewBox="0 0 100 100" preserveAspectRatio="none"
+                  <svg className={`overlay ${activeIssue ? "has-active" : ""} ${pickingIssueId || pickingFeatureKey ? "is-picking" : ""}`} viewBox="0 0 100 100" preserveAspectRatio="none"
                     onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}
                     onClick={(event) => void handleImagePositionClick(event)}>
                     <rect x="0" y="0" width="100" height="100" fill="transparent" pointerEvents="all" />
                     {issues.map((issue, index) => {
                       if (issue.locationUnresolved) return null;
                       const active = issue.id === activeId;
+                      const hiddenBySelection = Boolean(activeIssue && !active);
                       const cls =
                         issue.severity === "high"
                           ? "svg-high"
@@ -1351,8 +1419,8 @@ export default function Home() {
                       return (
                         <g
                           key={issue.id}
-                          className={active ? "svg-active" : ""}
-                          pointerEvents={pickingIssueId || pickingFeatureKey ? "none" : undefined}
+                          className={`${active ? "svg-active" : ""}${hiddenBySelection ? " svg-hidden" : ""}`}
+                          pointerEvents={hiddenBySelection || pickingIssueId || pickingFeatureKey ? "none" : undefined}
                           onClick={() => { if (!pickingIssueId && !pickingFeatureKey) setActiveId(issue.id); }}
                         >
                           <title>{issue.title}{issue.locationPinned ? "，位置已固定" : "，可拖曳調整"}</title>
@@ -1366,9 +1434,10 @@ export default function Home() {
                             onPointerDown={(event) => handleOverlayPointerDown(event, issue, "move")}
                           />
                           {active && !issue.locationPinned && !pickingIssueId && !pickingFeatureKey && <rect
-                            x={svgValue(issue.bbox.x + issue.bbox.w) - 1.5}
-                            y={svgValue(issue.bbox.y + issue.bbox.h) - 1.5}
-                            width="3" height="3" rx="0.5" className="resize-handle"
+                            x={svgValue(issue.bbox.x + issue.bbox.w) - resizeHandleWidth / 2}
+                            y={svgValue(issue.bbox.y + issue.bbox.h) - resizeHandleHeight / 2}
+                            width={resizeHandleWidth} height={resizeHandleHeight}
+                            rx={Math.min(resizeHandleWidth, resizeHandleHeight) / 5} className="resize-handle"
                             onPointerDown={(event) => handleOverlayPointerDown(event, issue, "resize")}
                           />}
                           <circle

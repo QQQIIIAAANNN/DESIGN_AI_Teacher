@@ -1913,6 +1913,8 @@ html, body { background: var(--canvas); color: var(--ink); font-family: -apple-s
 .advanced-image-action summary { cursor: pointer; }
 .advanced-image-action button { margin-top: 8px; }
 .overlay.is-picking { cursor: crosshair; }
+.overlay > g { transition: opacity .14s ease; }
+.overlay.has-active > g.svg-hidden { pointer-events: none; opacity: 0; }
 .overlay.is-picking > g { pointer-events: none; opacity: .18; }
 .overlay.is-picking > g.svg-active { opacity: 1; }
 .overlay.is-picking > rect:first-child { cursor: crosshair; }
