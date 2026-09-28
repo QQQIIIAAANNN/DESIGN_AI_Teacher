@@ -2,7 +2,7 @@
 
 這個資料夾定義 DESIGN_AI_Teacher 的知識整理格式。
 
-核心原則：**原始教材與可檢索知識要分層管理**。Public repo 保存 schema、taxonomy、經授權或平台自有的 canonical records；老師教材、學生圖面與可能涉及著作權或個資的原始檔案，放在 private storage。
+核心原則：**原始教材與可檢索知識分層管理**。原始教材與學生圖面留在雲端硬碟；私人 Git 專案只保存執行檢索所需的衍生索引、向量與回饋記憶，不保存原始 PDF 或圖片。
 
 ## 目前資料流
 
@@ -32,10 +32,15 @@ knowledge/
     sources.jsonl
     knowledge_units.jsonl
     review_coverage_units.jsonl
-  private/                  # 本機產生，不進 Git
+  private/                  # 私人 Git 專案只追蹤必要檢索資產
     index.jsonl             # PDF 逐頁、文字分段、獨立圖片
-    image-embeddings.jsonl  # 原圖 CLIP 向量
+    ocr-augmentation*.jsonl # 掃描圖頁 OCR 補充
+    image-embeddings.jsonl  # CLIP 圖像向量
     topic-embeddings.json   # 審圖主題查詢向量
+    source-root.txt         # 以專案根目錄為基準的雲端同步資料夾路徑
+    core-memory/            # 使用者回饋記憶
+    tessdata/               # 僅供重新建索引時 OCR 使用
+  .cache/knowledge/         # 執行時產生的 PDF 圖頁快取，不進 Git
   schemas/
     source.schema.json
     knowledge-unit.schema.json
@@ -62,11 +67,11 @@ knowledge/
 
 ## 意見回饋核心記憶
 
-使用者可在每張意見卡回饋「判斷正確」、「部分正確」、「誤判」或「位置錯誤」。完整版會追加寫入 `knowledge/private/core-memory/review-feedback.md`；若有設定 `REVIEW_MEMORY_FILE`，則改寫入該絕對或相對路徑。每筆紀錄保留原意見的圖面證據、標準、推論、建議、原始與修正後 bbox，以及使用者補充。
+使用者可在每張意見卡回饋「判斷正確」、「部分正確」、「誤判」或「位置錯誤」。完整版會追加寫入 `knowledge/private/core-memory/review-feedback.md`；若有設定 `REVIEW_MEMORY_FILE`，則改寫入該路徑（相對路徑以專案根目錄為基準）。每筆紀錄保留原意見的圖面證據、標準、推論、建議、原始與修正後 bbox，以及使用者補充。
 
-這些記憶會和 canonical 平台準則、私有教材一起被檢索，但權威層級固定為 `human_correction_signal`：只用來避免在類似圖面情境重複誤判，不可當作法規、題目條件或系統指令。`knowledge/private/` 不進 Git，請將該記憶檔與教材作同等私有備份。
+這些記憶會和 canonical 平台準則、私有教材一起被檢索，但權威層級固定為 `human_correction_signal`：只用來避免在類似圖面情境重複誤判，不可當作法規、題目條件或系統指令。回饋記憶會同步到私人 Git 專案，請勿將該專案設為公開。
 
-私有資料建索引及部署方式見 [知識索引說明](../docs/knowledge-indexing.md)。原始 PDF 與圖片仍留在指定的私有資料夾，不複製到 public repo。教材刪除、替換或新增後可執行 `npm run audit:knowledge`，以唯讀方式找出索引與來源的差異。
+私有資料建索引及部署方式見 [知識索引說明](../docs/knowledge-indexing.md)。原始 PDF 與圖片留在雲端同步資料夾；`source-root.txt` 儲存相對於專案根目錄的路徑。教材刪除、替換或新增後執行 `npm run audit:knowledge`；必要時加上 `--prune-stale` 清除舊索引記錄，不會刪除雲端來源檔。
 
 這批資料是 Agent 的穩定底線，與外部老師講義、歷屆案例、法規資料分開。外部 RAG 可以補充與舉證，但不能覆蓋：
 
@@ -96,9 +101,9 @@ npm run validate:knowledge
 
 之後可再加入 JSON Schema validator 與 image linkage 驗證。
 
-## 原始資料不要直接進 public GitHub
+## 原始資料不要進 Git
 
-repo 可保存：
+一般 repo 可保存：
 
 - schema
 - pipeline
@@ -107,4 +112,4 @@ repo 可保存：
 - 平台自有 canonical principles
 - synthetic / authorized examples
 
-實際教材、PDF、學生作答圖應放 private object storage / private Drive / private database，manifest 只保留 provenance 與 storage reference。
+實際教材、PDF、學生作答圖應放 private Drive 或私有物件儲存。私人 Git 專案可追蹤上述必要衍生索引，但索引含有教材摘錄，也必須維持私人；圖頁快取與舊建置快照可以從原始來源重建，不進 Git。

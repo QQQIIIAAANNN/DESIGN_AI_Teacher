@@ -11,6 +11,8 @@ import shutil
 import subprocess
 from PIL import Image
 
+from private_knowledge_paths import project_path, render_cache_dir, source_root_from
+
 
 def chunks(text: str, size: int = 850, overlap: int = 100):
     start = 0
@@ -32,9 +34,9 @@ def main() -> int:
     args = parser.parse_args()
     if args.shards < 1 or not 0 <= args.shard < args.shards:
         parser.error("--shard must be between 0 and --shards - 1")
-    index_file = args.index.resolve(strict=True)
+    index_file = project_path(args.index, strict=True)
     folder = index_file.parent
-    root = Path((folder / "source-root.txt").read_text(encoding="utf-8").strip()).resolve(strict=True)
+    root = source_root_from(folder)
     tessdata = folder / "tessdata"
     if not (tessdata / "chi_tra.traineddata").exists():
         parser.error(f"Traditional Chinese OCR model missing: {tessdata / 'chi_tra.traineddata'}")
@@ -78,7 +80,7 @@ def main() -> int:
                     source = (root / match.group(1)).resolve(strict=True)
                     if not source.is_relative_to(root):
                         raise RuntimeError("PDF path outside source root")
-                    render_dir = folder / "rendered"
+                    render_dir = render_cache_dir()
                     render_dir.mkdir(parents=True, exist_ok=True)
                     base = render_dir / hashlib.sha256(row["id"].encode()).hexdigest()[:24]
                     image_path = base.with_suffix(".jpg")

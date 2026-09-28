@@ -1,52 +1,21 @@
 """Incrementally index private course PDFs and drawings without copying originals into Git."""
 
 import argparse
-import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-EXCLUDED_PDF_NAMES = {
-    "敷地臨摹作業-2025-07-05.pdf", "K圖會2025建築設計模擬考題-設計博物館設計.pdf",
-    "K圖會-設計課模擬題目.pdf", "建築敷地考題2025第二次K圖會大評圖.pdf",
-    "105170_0106_建築計畫與設計(圖書館與社區公共空間).pdf",
-    "109年高考(設計)-城市未來生活體驗館設計.pdf", "098高考(設計)-休假與訓練中心.pdf",
-    "95年歷史建築保存再利用社區.pdf", "共享公寓企劃.pdf",
-}
-EXCLUDED_PDF_PAGES = {
-    "K圖會-陳伊建築師-partseven-建築計畫示範.pdf": {15, 20},
-    "K圖會-20171029客評講師劭寧建築師考試分享.pdf": {41, 42, 43, 44},
-}
-EXCLUDED_IMAGE_PATHS = {
-    "output/playwright/review-card-focus.png",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (1).jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (2).jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (3).jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (4).jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/110年專技(敷地)-某地方區政中心_頁面_1.jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/110年專技(敷地)-某地方區政中心_頁面_2.jpg",
-}
-GENERATED_INDEX_DIR = "知識索引"
-
-
-def excluded_source(path: Path, root: Path) -> bool:
-    relative = path.relative_to(root)
-    if GENERATED_INDEX_DIR in relative.parts:
-        return True
-    if path.suffix.lower() == ".pdf" and path.name in EXCLUDED_PDF_NAMES:
-        return True
-    return path.suffix.lower() in IMAGE_EXTENSIONS and relative.as_posix() in EXCLUDED_IMAGE_PATHS
-
-
-def fingerprint(path: Path, root: Path) -> str:
-    stat = path.stat()
-    return hashlib.sha256(f"{path.relative_to(root).as_posix()}|{stat.st_size}|{stat.st_mtime_ns}".encode()).hexdigest()[:20]
-
+from private_knowledge_paths import (
+    EXCLUDED_PDF_PAGES,
+    is_excluded_source,
+    is_supported_source,
+    project_path,
+    relative_source_root,
+    source_fingerprint,
+)
 
 def clean(text: str) -> str:
     return re.sub(r"[ \t]+", " ", text.replace("\x00", " ")).strip()
@@ -95,12 +64,15 @@ def ocr_languages(tesseract: str | None, tessdata: Path | None) -> str | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build local text/page/image RAG index from a private course folder.")
-    parser.add_argument("source", type=Path, help="Private source folder, e.g. C:\\Users\\User\\Downloads\\K圖會")
+    parser.add_argument("source", type=Path, nargs="?", default=Path("../K圖會"),
+                        help="Private source folder, relative to the project root (default: ../K圖會)")
     parser.add_argument("--output", type=Path, default=Path("knowledge/private/index.jsonl"))
+    parser.add_argument("--only-source", action="append", default=[],
+                        help="Index only this source-relative file; may be passed multiple times")
     parser.add_argument("--ocr-images", action="store_true", help="OCR standalone images using installed Tesseract languages")
     args = parser.parse_args()
-    root = args.source.resolve(strict=True)
-    output = args.output.resolve()
+    root = project_path(args.source, strict=True)
+    output = project_path(args.output)
     if not root.is_dir():
         parser.error("Source must be a directory")
     pdftotext = shutil.which("pdftotext")
@@ -112,7 +84,7 @@ def main() -> int:
     tessdata = private_tessdata if (private_tessdata / "chi_tra.traineddata").exists() else None
     langs = ocr_languages(tesseract, tessdata)
     output.parent.mkdir(parents=True, exist_ok=True)
-    (output.parent / "source-root.txt").write_text(str(root), encoding="utf-8")
+    (output.parent / "source-root.txt").write_text(relative_source_root(root), encoding="utf-8")
     existing: set[str] = set()
     if output.exists():
         for line in output.open("r", encoding="utf-8"):
@@ -120,11 +92,16 @@ def main() -> int:
                 existing.add(json.loads(line)["id"])
             except (ValueError, KeyError):
                 continue
-    candidates = [path for path in root.rglob("*") if path.is_file() and
-                  (path.suffix.lower() == ".pdf" or path.suffix.lower() in IMAGE_EXTENSIONS)
-                  and GENERATED_INDEX_DIR not in path.relative_to(root).parts]
-    excluded_sources = [path for path in candidates if excluded_source(path, root)]
-    files = sorted((path for path in candidates if not excluded_source(path, root)), key=lambda path: str(path).casefold())
+    candidates = [path for path in root.rglob("*") if is_supported_source(path)]
+    excluded_sources = [path for path in candidates if is_excluded_source(path, root)]
+    files = sorted((path for path in candidates if not is_excluded_source(path, root)), key=lambda path: str(path).casefold())
+    if args.only_source:
+        requested = {value.replace("\\", "/") for value in args.only_source}
+        selected = {path.relative_to(root).as_posix(): path for path in files}
+        missing = sorted(requested - selected.keys())
+        if missing:
+            parser.error("Requested source is missing or excluded: " + ", ".join(missing))
+        files = [selected[value] for value in sorted(requested)]
     counts = {"pdf": 0, "pages": 0, "text": 0, "images": 0, "ocr": 0, "errors": 0, "existing": len(existing), "excluded_sources": len(excluded_sources), "excluded_pages": 0}
     with output.open("a", encoding="utf-8") as writer:
         def append(row: dict):
@@ -136,7 +113,7 @@ def main() -> int:
 
         for number, path in enumerate(files, 1):
             relative = path.relative_to(root).as_posix()
-            digest = fingerprint(path, root)
+            digest = source_fingerprint(path, root)
             title = path.stem
             metadata = f"{path.parent.relative_to(root).as_posix().replace('/', ' ')} {title}"
             try:

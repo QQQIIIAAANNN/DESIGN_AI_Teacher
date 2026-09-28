@@ -1,38 +1,20 @@
-"""Read-only check that the private index matches the files still on disk."""
+"""Audit, and optionally prune, the private knowledge index against synced sources."""
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import re
 
+from private_knowledge_paths import (
+    is_excluded_record,
+    is_excluded_source,
+    is_supported_source,
+    project_path,
+    source_file,
+    source_fingerprint,
+    source_root_from,
+)
 
-EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif"}
-EXCLUDED_PDF_NAMES = {
-    "敷地臨摹作業-2025-07-05.pdf", "K圖會2025建築設計模擬考題-設計博物館設計.pdf",
-    "K圖會-設計課模擬題目.pdf", "建築敷地考題2025第二次K圖會大評圖.pdf",
-    "105170_0106_建築計畫與設計(圖書館與社區公共空間).pdf",
-    "109年高考(設計)-城市未來生活體驗館設計.pdf", "098高考(設計)-休假與訓練中心.pdf",
-    "95年歷史建築保存再利用社區.pdf", "共享公寓企劃.pdf",
-}
-EXCLUDED_IMAGE_PATHS = {
-    "output/playwright/review-card-focus.png",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (1).jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (2).jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (3).jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/109年專技(敷地)-都市國民小學新校園 (4).jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/110年專技(敷地)-某地方區政中心_頁面_1.jpg",
-    "課程/20251102術科_設計課第三十五堂-1_A/第8堂課-吳凡課程1141102(日)/36-敷地配置-考題分析/110年專技(敷地)-某地方區政中心_頁面_2.jpg",
-}
-
-
-def excluded_source(path: Path, root: Path) -> bool:
-    relative = path.relative_to(root)
-    if "知識索引" in relative.parts:
-        return True
-    if path.suffix.lower() == ".pdf" and path.name in EXCLUDED_PDF_NAMES:
-        return True
-    return path.suffix.lower() != ".pdf" and relative.as_posix() in EXCLUDED_IMAGE_PATHS
 SOURCE_ID = re.compile(r"^(?:PV|PT|IMG)-([a-f0-9]{20})(?:-|$)")
 OCR_ID = re.compile(r"^OCR-(.+)-\d+$")
 
@@ -46,63 +28,98 @@ def rows_from(file: Path):
                 continue
 
 
-def fingerprint(path: Path, root: Path) -> str:
-    stat = path.stat()
-    relative = path.relative_to(root).as_posix()
-    return hashlib.sha256(f"{relative}|{stat.st_size}|{stat.st_mtime_ns}".encode()).hexdigest()[:20]
+def write_rows(file: Path, rows: list[dict]) -> None:
+    temporary = file.with_name(f".{file.name}.tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as writer:
+        for row in rows:
+            writer.write(json.dumps(row, ensure_ascii=False) + "\n")
+    temporary.replace(file)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check for deleted, added, or changed K圖會 sources without editing files.")
+    parser = argparse.ArgumentParser(description="Check the private index against the current cloud-synced source folder.")
     parser.add_argument("--index", type=Path, default=Path("knowledge/private/index.jsonl"))
-    parser.add_argument("--source", type=Path)
+    parser.add_argument("--source", type=Path, help="Source folder, relative to the project root")
+    parser.add_argument("--prune-stale", action="store_true",
+                        help="Remove excluded, missing, changed, and orphaned index/vector/OCR rows; never touches source files")
     args = parser.parse_args()
-    index = args.index.resolve(strict=True)
-    root = (args.source or Path((index.parent / "source-root.txt").read_text(encoding="utf-8").strip())).resolve(strict=True)
+
+    index = project_path(args.index, strict=True)
+    root = project_path(args.source, strict=True) if args.source else source_root_from(index.parent)
     if not root.is_dir():
         parser.error("Source must be a directory")
 
     base = list(rows_from(index))
-    indexed = {row["source_path"] for row in base if row.get("source_path")}
-    images = {row["id"] for row in base if row.get("kind") == "image"}
-    current = {path.relative_to(root).as_posix(): path for path in root.rglob("*")
-               if path.is_file() and path.suffix.lower() in EXTENSIONS and not excluded_source(path, root)}
+    current = {
+        path.relative_to(root).as_posix(): path
+        for path in root.rglob("*")
+        if is_supported_source(path) and not is_excluded_source(path, root)
+    }
+    indexed = {str(row["source_path"]) for row in base if row.get("source_path")}
     missing = sorted(indexed - current.keys())
     new = sorted(current.keys() - indexed)
-    indexed_digests = {}
-    for row in base:
-        match = SOURCE_ID.match(row.get("id", ""))
-        if match:
-            indexed_digests.setdefault(row["source_path"], set()).add(match.group(1))
-    changed = sorted(relative for relative in indexed & current.keys()
-                     if indexed_digests.get(relative) != {fingerprint(current[relative], root)})
 
-    orphan_ocr = 0
-    ocr_chunks = 0
-    for file in index.parent.glob("ocr-augmentation*.jsonl"):
-        for row in rows_from(file):
-            ocr_chunks += 1
-            match = OCR_ID.match(row.get("id", ""))
-            orphan_ocr += not match or match.group(1) not in images
-    orphan_vectors = 0
-    vectors = 0
+    indexed_digests: dict[str, set[str]] = {}
+    for row in base:
+        match = SOURCE_ID.match(str(row.get("id", "")))
+        if match and row.get("source_path"):
+            indexed_digests.setdefault(str(row["source_path"]), set()).add(match.group(1))
+    changed = sorted(
+        relative for relative in indexed & current.keys()
+        if indexed_digests.get(relative) != {source_fingerprint(current[relative], root)}
+    )
+
+    valid_base = []
+    for row in base:
+        relative = str(row.get("source_path", ""))
+        source = source_file(root, relative) if relative else None
+        match = SOURCE_ID.match(str(row.get("id", "")))
+        if (source and source.is_file() and relative in current and match and
+                match.group(1) == source_fingerprint(source, root) and not is_excluded_record(row)):
+            valid_base.append(row)
+    valid_image_ids = {str(row["id"]) for row in valid_base if row.get("kind") == "image" and row.get("id")}
+
+    augmentation_files = sorted(index.parent.glob("ocr-augmentation*.jsonl"))
+    augmentations = {file: list(rows_from(file)) for file in augmentation_files}
+    valid_augmentations = {
+        file: [row for row in rows if (match := OCR_ID.match(str(row.get("id", "")))) and match.group(1) in valid_image_ids]
+        for file, rows in augmentations.items()
+    }
+
     vector_file = index.parent / "image-embeddings.jsonl"
-    if vector_file.exists():
-        for row in rows_from(vector_file):
-            vectors += 1
-            orphan_vectors += row.get("id") not in images
+    vectors = list(rows_from(vector_file)) if vector_file.exists() else []
+    valid_vectors = [row for row in vectors if str(row.get("id", "")) in valid_image_ids]
 
     result = {
-        "source_files": len(current), "pdf_files": sum(path.suffix.lower() == ".pdf" for path in current.values()),
-        "standalone_images": sum(path.suffix.lower() != ".pdf" for path in current.values()),
-        "indexed_sources": len(indexed), "base_records": len(base),
-        "ocr_chunks": ocr_chunks, "image_vectors": vectors,
-        "missing_sources": len(missing), "new_sources": len(new), "changed_sources": len(changed),
-        "orphan_ocr_chunks": orphan_ocr, "orphan_vectors": orphan_vectors,
-        "missing_preview": missing[:10], "new_preview": new[:10], "changed_preview": changed[:10],
+        "source_files": len(current),
+        "indexed_sources": len(indexed),
+        "base_records": len(base),
+        "usable_records": len(valid_base),
+        "excluded_or_stale_records": len(base) - len(valid_base),
+        "ocr_chunks": sum(map(len, augmentations.values())),
+        "orphan_ocr_chunks": sum(map(len, augmentations.values())) - sum(map(len, valid_augmentations.values())),
+        "image_vectors": len(vectors),
+        "orphan_vectors": len(vectors) - len(valid_vectors),
+        "missing_sources": len(missing),
+        "new_sources": len(new),
+        "changed_sources": len(changed),
+        "missing_preview": missing[:10],
+        "new_preview": new[:10],
+        "changed_preview": changed[:10],
     }
+
+    if args.prune_stale:
+        write_rows(index, valid_base)
+        for file, rows in valid_augmentations.items():
+            write_rows(file, rows)
+        if vector_file.exists():
+            write_rows(vector_file, valid_vectors)
+        result["pruned_records"] = len(base) - len(valid_base)
+        result["pruned_ocr_chunks"] = result["orphan_ocr_chunks"]
+        result["pruned_vectors"] = result["orphan_vectors"]
+
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 1 if missing or new or changed or orphan_ocr or orphan_vectors else 0
+    return 1 if missing or new or changed else 0
 
 
 if __name__ == "__main__":

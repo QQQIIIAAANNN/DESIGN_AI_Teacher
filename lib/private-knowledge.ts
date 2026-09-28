@@ -170,13 +170,15 @@ export async function searchPrivateKnowledge(query: string, limit = 8, focusKeys
 }
 
 async function sourceRoot() {
-  if (process.env.KNOWLEDGE_SOURCE_DIR?.trim()) return path.resolve(process.env.KNOWLEDGE_SOURCE_DIR.trim());
-  return (await readFile(path.join(path.dirname(indexFile()), "source-root.txt"), "utf8")).trim();
+  const configured = process.env.KNOWLEDGE_SOURCE_DIR?.trim() ||
+    (await readFile(path.join(path.dirname(indexFile()), "source-root.txt"), "utf8")).trim();
+  return path.resolve(process.cwd(), configured);
 }
 
 function insideRoot(root: string, relative: string) {
-  const resolved = path.resolve(root, relative);
-  const diff = path.relative(root, resolved);
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(resolvedRoot, relative);
+  const diff = path.relative(resolvedRoot, resolved);
   if (diff === ".." || diff.startsWith(`..${path.sep}`) || path.isAbsolute(diff)) throw new Error("知識圖片路徑超出來源資料夾。");
   return resolved;
 }
@@ -193,7 +195,7 @@ export async function getKnowledgeImageDataUrl(id: string): Promise<string | nul
       if (!match) return null;
       source = insideRoot(root, match[1]);
       const key = createHash("sha256").update(row.id).digest("hex").slice(0, 24);
-      const renderDir = path.join(path.dirname(indexFile()), "rendered");
+      const renderDir = path.join(process.cwd(), ".cache", "knowledge", "rendered");
       const outputBase = path.join(renderDir, key);
       await mkdir(renderDir, { recursive: true });
       try { await stat(`${outputBase}.jpg`); } catch {

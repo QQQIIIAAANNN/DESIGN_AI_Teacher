@@ -50,8 +50,9 @@ let writeQueue: Promise<unknown> = Promise.resolve();
 let cache: { mtime: number; records: Array<{ id: string; title: string; text: string; tokens: Set<string> }> } | null = null;
 
 function memoryFile() {
-  return path.resolve(process.env.REVIEW_MEMORY_FILE ||
-    path.join(process.cwd(), "knowledge", "private", "core-memory", "review-feedback.md"));
+  const configured = process.env.REVIEW_MEMORY_FILE?.trim() ||
+    "knowledge/private/core-memory/review-feedback.md";
+  return path.resolve(process.cwd(), configured);
 }
 
 function safeInline(value: unknown, limit = 1600) {

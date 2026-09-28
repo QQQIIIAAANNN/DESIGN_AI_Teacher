@@ -1,68 +1,61 @@
-# 私有教材文字與圖面索引
+# 私有教材索引與部署
 
-平台自有的 canonical 準則在 `knowledge/manifests/`；老師教材與圖面需保留來源及人工審定狀態。私有索引放在 `knowledge/private/`，此資料夾已排除 Git。
+原始 PDF、圖片與課程資料留在雲端硬碟，不複製進 Git。私人專案只追蹤執行檢索需要的文字索引、OCR 補充、向量、回饋記憶及繁體中文 OCR 模型；索引含有教材摘錄，因此 GitHub 專案必須維持 Private。
 
-## 本機建索引
+## 專案內保留的資料
 
-在專案根目錄執行：
+- `knowledge/private/index.jsonl`：PDF 頁面、文字段落與圖片來源索引。
+- `knowledge/private/ocr-augmentation*.jsonl`：掃描頁與圖片的 OCR 補充，內容仍待人工核對。
+- `knowledge/private/image-embeddings.jsonl`、`topic-embeddings.json`：圖像與審圖主題向量。
+- `knowledge/private/core-memory/review-feedback.md`：使用者回饋形成的修正訊號。
+- `knowledge/private/source-root.txt`：原始雲端同步資料夾相對於專案根目錄的位置。
+- `knowledge/private/tessdata/`：需要重新執行 OCR 時使用的語言模型。
+
+原始教材不進 Git。PDF 頁面渲染快取寫到 `.cache/knowledge/rendered/`；舊快照、重複索引與可重建快取不保留在專案資料中，`.cache/` 也已加入 Git 忽略清單。
+
+## 路徑設定
+
+所有索引、向量、回饋記憶與快取預設都以專案根目錄為基準。`source-root.txt` 預設為 `../K圖會`，也就是雲端硬碟同步資料夾與專案放在同一層的情況。若另一台電腦的同步資料夾位置不同，修改本機 `.env.local` 的 `KNOWLEDGE_SOURCE_DIR`，填入相對於專案根目錄的路徑；不必把該路徑寫成特定電腦的絕對位置。
+
+`.env.local.example` 已列出預設值。`.env.local` 不進 Git；雲端部署時應把來源資料掛載在服務可讀取的位置，並設定相對路徑。不要把原始資料放進靜態網站輸出或公開目錄。
+
+## 建索引與稽核
+
+在專案根目錄執行。需要 Poppler 的 `pdftotext`、`pdfinfo`；若要建獨立圖片 OCR，另需安裝 Tesseract。
 
 ```powershell
-python scripts/build-private-knowledge.py "C:\Users\User\Downloads\K圖會" --ocr-images
+python scripts/build-private-knowledge.py --ocr-images
 npm run audit:knowledge
 ```
 
-此程式只讀取當下存在的 PDF 與圖片。PDF 以 Poppler 逐頁擷取文字，約 1,000 字分段並保留 120 字重疊；每頁同時建立圖頁記錄。獨立圖片建立影像記錄，若 Tesseract 可用則擷取可見文字並標示 `ocr_text_needs_review`。PDF 掃描頁若無嵌入文字，會保留 `needs_visual_reading` 狀態，不會假裝已讀到中文字。
-
-這台電腦原先的 Tesseract 只有 `eng` 與 `osd`。目前已將 [Tesseract 官方 `tessdata_fast` 繁體中文模型](https://github.com/tesseract-ocr/tessdata_fast/blob/main/chi_tra.traineddata) 放在私有 `knowledge/private/tessdata/`，可執行第二輪繁體中文 OCR：
+預設來源為 `../K圖會`。如需只補入一份新教材，可指定相對於來源資料夾的檔案路徑：
 
 ```powershell
-& "D:\MA system\LangGraph\langgraph-env\Scripts\python.exe" scripts/augment-private-ocr.py
+python scripts/build-private-knowledge.py --only-source "課程/補充知識/新教材.pdf"
 ```
 
-一般執行會處理獨立圖片與原本沒有嵌入文字的 PDF 頁面。本機已先針對 239 個無內嵌文字 PDF 頁面完成四份平行 OCR：
+建索引與稽核共用同一套排除規則：略過隱藏工作資料夾、`output/`、`知識索引/`、純考題 PDF 及指定的純考題頁／圖片，避免把臨時附件或評分用題目當成教學知識。
+
+`npm run audit:knowledge` 只讀取並比對來源，不會修改索引。若要清除已刪除、改變、被排除來源的舊記錄，以及孤立的 OCR／向量，明確執行：
 
 ```powershell
-0..3 | ForEach-Object { & "D:\MA system\LangGraph\langgraph-env\Scripts\python.exe" scripts/augment-private-ocr.py --pdf-only --shards 4 --shard $_ }
+python scripts/audit-private-knowledge.py --prune-stale
+npm run audit:knowledge
 ```
 
-上例為依序執行；需要縮短等待時間時可在四個終端各執行一個 shard。程式只把中文比例及字數達基本門檻的片段加入 `ocr-augmentation*.jsonl`，並標記為尚待人工核對。目前 239 頁中有 73 頁產生 98 個補充文字片段；另有 38 張獨立圖片在先前的部分掃描中產生 42 個片段。其餘圖頁仍有原圖記錄，無法辨識的文字不會被捏造成已讀取。手繪細字與歪斜掃描仍可能讀不準，檢索結果不能因此升格成正式規則。
+清理只會改寫專案內的索引與衍生記錄，不會刪除或修改雲端硬碟的原始檔。同步雲端資料夾後，先稽核；若來源檔大小或修改時間改變，需重建相關索引，並視需要重新產生 OCR 或向量。
 
-電腦上有快取的 CLIP 模型，以下需使用包含 PyTorch、Transformers、Pillow 的 Python 環境產生圖片向量。這台電腦可用的環境是 `D:\MA system\LangGraph\langgraph-env\Scripts\python.exe`；其他電腦可改成自己的 Python 執行檔：
+繁體中文 OCR 使用 `knowledge/private/tessdata/chi_tra.traineddata`；平行處理掃描 PDF 頁面可執行：
 
 ```powershell
-& "D:\MA system\LangGraph\langgraph-env\Scripts\python.exe" scripts/embed-private-images.py
-& "D:\MA system\LangGraph\langgraph-env\Scripts\python.exe" scripts/embed-private-images.py --pdf-textless-only
+python scripts/augment-private-ocr.py --pdf-only --shards 4 --shard 0
+python scripts/augment-private-ocr.py --pdf-only --shards 4 --shard 1
+python scripts/augment-private-ocr.py --pdf-only --shards 4 --shard 2
+python scripts/augment-private-ocr.py --pdf-only --shards 4 --shard 3
 ```
 
-第二個命令只針對沒有內嵌文字的 PDF 圖頁產生向量。本機目前已建立 558 張獨立圖片與 239 個無文字 PDF 圖頁的向量。其他 PDF 頁已用頁面嵌入文字建立搜尋索引，選中後可把原圖頁交給模型核對；若需每頁都有視覺向量，可用 `--include-pdf`，但需要更多 CPU 時間與私有磁碟空間。腳本可重跑，會跳過已索引的圖片。向量資料和逐頁渲染圖片都留在 `knowledge/private/`。
+向量已隨私人索引保存。只有新增圖片或需要更新向量時才執行 `scripts/embed-private-images.py`；它需要安裝 PyTorch、Transformers、Pillow，並已快取 CLIP 模型。
 
 ## 執行時檢索
 
-本機審圖以中文雙字詞倒排索引找相關文字與 PDF 圖頁，再以 CLIP 圖像／主題向量找獨立圖面。每輪混合平台 canonical 要點、私有文字摘錄與參考圖頁。參考圖頁會和來源編號一同送給已連線的 CLI 模型，但會明確標示不是本次作答原圖。法規判斷仍需可核對的正式來源、版本與圖面尺寸。
-
-若私有索引與原始素材不在預設位置，可設：
-
-```powershell
-$env:PRIVATE_KNOWLEDGE_INDEX="D:\private-knowledge\index.jsonl"
-$env:KNOWLEDGE_SOURCE_DIR="D:\K圖會"
-```
-
-正式部署時，這兩個路徑需位於只有伺服器可讀取的私有磁碟；不可公開 `knowledge/private/`、原始 PDF 或圖片。Supabase 的結構表目前不能取代這個本機向量索引；若遷移到雲端，需先完成私有物件儲存、權限與向量匯入。部署時也要套用 `supabase/migrations/20260926000100_review_strengths.sql`，讓值得保留的審圖項目能保存。
-
-## 人工回饋核心記憶
-
-意見卡的「判斷正確／部分正確／誤判／位置錯誤」會以結構化 Markdown 追加至：
-
-```text
-knowledge/private/core-memory/review-feedback.md
-```
-
-可以用 `REVIEW_MEMORY_FILE` 改指其他私有路徑。回饋寫入經過會員驗證（若已設定 Supabase），並會限制長度、清理 Markdown/HTML 控制文字。檢索時它會以 `user_feedback_memory` / `feedback_record` 和 canonical 準則、私有教材同時召回，但只能當作人工修正訊號，不得取代當次圖面證據、題目條件或正式法規。
-
-這個檔案屬於使用者行為與圖面關聯資料，已由 `knowledge/private/` 排除 Git；備份、存取權與保留週期應比照私有教材處理。
-
-## 來源異動
-
-`npm run audit:knowledge` 會唯讀比對目前資料夾與索引，列出已刪除、新增或內容已改變的來源，以及無對應原圖的 OCR／向量紀錄。來源資料夾目前有 71 份 PDF 與 558 張獨立圖片。知識快照排除 10 份純考題／作業 PDF、講義中的 6 頁純題目，以及考題分析資料夾內 6 張純題目影像；其餘 61 份 PDF 和 552 張獨立圖片納入檢索。建索引和稽核會略過「知識索引」工作資料夾，並沿用同一排除清單。稽核也會核對來源大小與修改時間；被刪除或替換的來源會從審圖檢索中排除。
-
-若日後新增或大幅更換原始教材，請輸出到一個**新的**私有資料夾，例如 `knowledge/private/snapshot-20261001/index.jsonl`，建索引時仍沿用純題目排除規則，再在該資料夾產生 OCR 與向量，並設定 `PRIVATE_KNOWLEDGE_INDEX` 指向新索引。腳本不會刪除舊索引或教材；新索引的位置必須與其 OCR、向量及 `source-root.txt` 相同。
+審圖會把平台 canonical 準則、私有教材索引與人工回饋記憶一併檢索。教材內容屬於未審定摘錄，回饋記憶屬於 `human_correction_signal`；兩者都不能取代題目條件、圖面證據或正式法規。PDF 頁面只有在需要作為視覺參考時才由 Poppler 渲染至 `.cache/knowledge/rendered/`。

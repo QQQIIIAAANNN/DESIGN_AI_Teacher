@@ -8,6 +8,8 @@ import re
 import shutil
 import subprocess
 
+from private_knowledge_paths import project_path, render_cache_dir, source_root_from
+
 TOPICS = {
     "brief": "architectural design brief and requirements", "site": "site context and urban fabric",
     "program": "architectural floor plan room program", "concept": "architectural concept diagram",
@@ -34,9 +36,9 @@ def main() -> int:
     from PIL import Image
     from transformers import CLIPImageProcessor, CLIPModel, CLIPTokenizerFast
 
-    index_file = args.index.resolve(strict=True)
+    index_file = project_path(args.index, strict=True)
     folder = index_file.parent
-    root = Path((folder / "source-root.txt").read_text(encoding="utf-8").strip()).resolve(strict=True)
+    root = source_root_from(folder)
     output = folder / "image-embeddings.jsonl"
     topic_output = folder / "topic-embeddings.json"
     rows = []
@@ -90,7 +92,7 @@ def main() -> int:
                     source = (root / match.group(1)).resolve(strict=True)
                     if not source.is_relative_to(root):
                         raise RuntimeError("Image path escapes source folder")
-                    render_dir = folder / "rendered"
+                    render_dir = render_cache_dir()
                     render_dir.mkdir(parents=True, exist_ok=True)
                     name = hashlib.sha256(row["id"].encode()).hexdigest()[:24]
                     base = render_dir / name
