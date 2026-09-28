@@ -1,9 +1,10 @@
 export type SuggestionRole = "wall" | "column" | "window" | "door" | "furniture" | "paving" | "planting" | "annotation";
 export type SuggestionAction = "add" | "remove";
 export type SuggestionElement = {
-  type: "line" | "rect" | "circle" | "polyline" | "label";
+  type: "line" | "arrow" | "rect" | "circle" | "polyline" | "label";
   role: SuggestionRole;
   action: SuggestionAction;
+  dashed?: boolean;
   x: number; y: number;
   x2?: number; y2?: number;
   w?: number; h?: number; r?: number;
@@ -13,7 +14,7 @@ export type SuggestionElement = {
 export type SuggestionPlan = { summary: string; elements: SuggestionElement[] };
 
 const roles = new Set<SuggestionRole>(["wall", "column", "window", "door", "furniture", "paving", "planting", "annotation"]);
-const types = new Set<SuggestionElement["type"]>(["line", "rect", "circle", "polyline", "label"]);
+const types = new Set<SuggestionElement["type"]>(["line", "arrow", "rect", "circle", "polyline", "label"]);
 const colors: Record<SuggestionRole, string> = {
   wall: "#e23b36", column: "#b63234", window: "#028bb2", door: "#b95014",
   furniture: "#6542b1", paving: "#d47d00", planting: "#23804b", annotation: "#ad244b"
@@ -33,7 +34,8 @@ export function normalizeSuggestionPlan(value: unknown): SuggestionPlan {
     const type = entry.type as SuggestionElement["type"];
     const element: SuggestionElement = { type, role: entry.role as SuggestionRole,
       action: entry.action === "remove" ? "remove" : "add", x, y };
-    if (type === "line") {
+    if (typeof entry.dashed === "boolean") element.dashed = entry.dashed;
+    if (type === "line" || type === "arrow") {
       const x2 = coordinate(entry.x2), y2 = coordinate(entry.y2);
       if (x2 === null || y2 === null) return [];
       element.x2 = x2; element.y2 = y2;
@@ -72,15 +74,27 @@ export function renderSuggestionSvg(imageDataUrl: string, width: number, height:
   const scale = Math.max(2, w / 260);
   const shapes = plan.elements.map((entry) => {
     const color = entry.action === "remove" ? "#9c47aa" : colors[entry.role];
-    const dash = entry.action === "remove" ? ` stroke-dasharray="${scale * 2} ${scale}"` : "";
+    const dash = entry.action === "remove" || entry.dashed ? ` stroke-dasharray="${scale * 2} ${scale}"` : "";
     const stroke = `stroke="${color}" stroke-width="${entry.role === "wall" ? scale * 2 : scale}" stroke-linecap="round" stroke-linejoin="round"${dash}`;
     const x = entry.x * w, y = entry.y * h;
-    if (entry.type === "line") return `<line x1="${x}" y1="${y}" x2="${entry.x2! * w}" y2="${entry.y2! * h}" ${stroke}/>`;
+    if (entry.type === "line" || entry.type === "arrow") {
+      const x2 = entry.x2! * w, y2 = entry.y2! * h;
+      const line = `<line x1="${x}" y1="${y}" x2="${x2}" y2="${y2}" ${stroke}/>`;
+      if (entry.type === "line") return line;
+      const dx = x2 - x, dy = y2 - y, length = Math.hypot(dx, dy);
+      if (length < 0.1) return line;
+      const ux = dx / length, uy = dy / length;
+      const head = Math.min(scale * 7, length * 0.24), halfWidth = head * 0.48;
+      const baseX = x2 - ux * head, baseY = y2 - uy * head;
+      const leftX = baseX - uy * halfWidth, leftY = baseY + ux * halfWidth;
+      const rightX = baseX + uy * halfWidth, rightY = baseY - ux * halfWidth;
+      return `<g>${line}<path d="M ${x2} ${y2} L ${leftX} ${leftY} L ${rightX} ${rightY} Z" fill="${color}"/></g>`;
+    }
     if (entry.type === "rect") return `<rect x="${x}" y="${y}" width="${entry.w! * w}" height="${entry.h! * h}" fill="${color}" fill-opacity="0.12" ${stroke}/>`;
     if (entry.type === "circle") return `<circle cx="${x}" cy="${y}" r="${entry.r! * Math.min(w, h)}" fill="${color}" fill-opacity="0.12" ${stroke}/>`;
     if (entry.type === "polyline") return `<polyline points="${entry.points!.map(([px, py]) => `${px * w},${py * h}`).join(" ")}" fill="none" ${stroke}/>`;
     return `<text x="${x}" y="${y}" fill="${color}" font-size="${scale * 5}" font-family="sans-serif" font-weight="700" paint-order="stroke" stroke="white" stroke-width="${scale}">${escapeXml(entry.text || "")}</text>`;
   }).join("\n");
   const footer = Math.max(62, Math.round(w / 12));
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${w} ${h + footer}" width="${w}" height="${h + footer}"><title>${escapeXml(title)}</title><rect width="${w}" height="${h + footer}" fill="#fff"/><image x="0" y="0" width="${w}" height="${h}" xlink:href="${imageDataUrl}"/><g>${shapes}</g><rect x="0" y="${h}" width="${w}" height="${footer}" fill="#17232a"/><text x="${scale * 3}" y="${h + footer * 0.38}" fill="white" font-size="${scale * 4}" font-family="sans-serif">${escapeXml(title.slice(0, 60))}</text><text x="${scale * 3}" y="${h + footer * 0.72}" fill="#ccd5d8" font-size="${scale * 2.5}" font-family="sans-serif">紅/彩色＝新增建議 · 紫色虛線＝移除建議 · 依原圖局部人工確認</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${w} ${h + footer}" width="${w}" height="${h + footer}"><title>${escapeXml(title)}</title><rect width="${w}" height="${h + footer}" fill="#fff"/><image x="0" y="0" width="${w}" height="${h}" xlink:href="${imageDataUrl}"/><g>${shapes}</g><rect x="0" y="${h}" width="${w}" height="${footer}" fill="#17232a"/><text x="${scale * 3}" y="${h + footer * 0.38}" fill="white" font-size="${scale * 4}" font-family="sans-serif">${escapeXml(title.slice(0, 60))}</text><text x="${scale * 3}" y="${h + footer * 0.72}" fill="#ccd5d8" font-size="${scale * 2.5}" font-family="sans-serif">彩色＝新增 · 紫色＝移除 · 箭頭＝動線/序列 · 虛線＝次要/待確認關係 · 依原圖人工確認</text></svg>`;
 }

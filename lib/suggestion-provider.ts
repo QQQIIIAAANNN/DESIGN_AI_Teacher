@@ -72,11 +72,13 @@ export async function generateSuggestion(data: FormData) {
       method: "POST", headers: { "Content-Type": "application/json", ...getCliProxyHeaders() }, signal: controller.signal,
       body: JSON.stringify({ model: model || status.models[0], temperature: 0.1, max_tokens: 3200, messages: [
         { role: "system", content: [
-          "你是建築圖面局部修改繪圖員。分析使用者選中的裁圖與修改方向，自行判斷用 SVG 幾何或圖片編修較可靠。",
+          "你是建築圖面局部修改繪圖員。分析使用者選中的裁圖與修改方向，優先用 SVG 幾何清楚表達修改；只有幾何無法忠實呈現時才改用圖片編修。",
           "只畫修正所需的牆、柱、窗、門、家具、鋪面、植栽與標註。不得編造比例、尺寸、隱藏牆線或無法看到的房間。",
-          "能以至少兩個可靠元素定位時選 mode=svg；幾何過於複雜或難以可靠表達時選 mode=image，並提供保留原圖方向與未修改區域的 imagePrompt。",
-          "SVG 每個元素使用相對於裁圖左上(0,0)、右下(1,1)的座標。新增 action=add，拆除 action=remove。標註不能取代圖形。",
-          '回傳純 JSON：SVG 為 {"mode":"svg","summary":"","elements":[{"type":"line|rect|circle|polyline|label","role":"wall|column|window|door|furniture|paving|planting|annotation","action":"add|remove","x":0.1,"y":0.1,"x2":0.2,"y2":0.2,"w":0.1,"h":0.1,"r":0.03,"points":[[0.1,0.1],[0.2,0.2]],"text":""}]}；圖片為 {"mode":"image","summary":"","imagePrompt":""}。SVG 只填對應 type 必需欄位。',
+          "圖面視覺優先以空間關係圖表達：用 arrow 箭頭表示主要動線、入口方向、空間序列；用 dashed 虛線表示次要動線、視線或待確認的關係；用 circle 圈出節點、用 rect 框出空間或區域。箭頭和框線要對準裁圖中可辨識的真實空間，勿遮蓋原有關鍵圖面。",
+          "先用箭頭、虛線、圓形和方框建立清楚的關係，再用少量短文字辨識空間或動作；標註原則上最多 3 個。能靠圖形說清楚就不要加文字，文字不可取代圖形。",
+          "能以至少兩個可靠元素定位時選 mode=svg；只有幾何過於複雜或無法可靠定位時才選 mode=image，並提供保留原圖方向與未修改區域的 imagePrompt。",
+          "SVG 每個元素使用相對於裁圖左上(0,0)、右下(1,1)的座標。新增 action=add，拆除 action=remove。line 與 arrow 可設 dashed=true。",
+          '回傳純 JSON：SVG 為 {"mode":"svg","summary":"","elements":[{"type":"line|arrow|rect|circle|polyline|label","role":"wall|column|window|door|furniture|paving|planting|annotation","action":"add|remove","dashed":false,"x":0.1,"y":0.1,"x2":0.2,"y2":0.2,"w":0.1,"h":0.1,"r":0.03,"points":[[0.1,0.1],[0.2,0.2]],"text":""}]}；圖片為 {"mode":"image","summary":"","imagePrompt":""}。SVG 只填對應 type 必需欄位。',
           "相關平台知識：", knowledgePrompt(knowledge)
         ].join("\n") },
         { role: "user", content: [{ type: "text", text: `問題：${title}\n圖面證據：${evidence}\n問題：${description}\n修改方向：${suggestion}\n請在局部原圖上定位修改。` }, { type: "image_url", image_url: { url: dataUrl, detail: "high" } }] }
