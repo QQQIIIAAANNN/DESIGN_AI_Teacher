@@ -2,6 +2,7 @@ import type {
   DrawingReview,
   ConfirmedRegion,
   ReviewItem,
+  ReviewDimension,
   SupplementReviewResult
 } from "@/lib/review-schema";
 import { observationPrompt, normalizeObservation, applyObservationOverrides, type ObservationOverrides } from "@/lib/review-observation";
@@ -14,6 +15,7 @@ import { questionReadingPrompt, normalizeQuestionContext, questionContextText, t
 import type { QuestionDocument } from "@/lib/question-source";
 import { practiceQuestionText, type PracticeQuestion } from "@/lib/practice-question";
 import { normalizeReviewMinutes, reviewScenarioInstruction, type ReviewScenarioId } from "@/lib/review-scenario";
+import { normalizeTargetedDimensionUpdates, targetedRescorePrompt, type ReviewRescoreContext } from "@/lib/review-score-update";
 import { createHash } from "node:crypto";
 import {
   createMockReview,
@@ -58,9 +60,18 @@ export type SupplementReviewInput = {
   targetMinutes?: number;
 };
 
+export type TargetedRescoreInput = ReviewRescoreContext & {
+  file: File;
+  model?: string;
+  intensity?: ReviewIntensity;
+  scenario?: ReviewScenarioId;
+  examType?: "design" | "site_planning";
+};
+
 export interface ReviewProvider {
   reviewDrawing(input: ReviewInput): Promise<DrawingReview>;
   reviewSupplement(input: SupplementReviewInput): Promise<SupplementReviewResult>;
+  rescoreDimensions(input: TargetedRescoreInput): Promise<ReviewDimension[]>;
 }
 
 export function getIntensityInstruction(intensity: ReviewIntensity = "standard"): string {
@@ -110,6 +121,10 @@ class MockReviewProvider implements ReviewProvider {
     input: SupplementReviewInput
   ): Promise<SupplementReviewResult> {
     return createMockSupplementReview(input.originalIssue);
+  }
+
+  async rescoreDimensions(): Promise<ReviewDimension[]> {
+    throw new Error("展示用 mock 模型不支援局部重評；請切換至可用的 AI 模型。");
   }
 }
 
@@ -202,7 +217,10 @@ async function readQuestionWithCli(baseUrl: string, model: string, document: Que
       : response.status === 429 ? "題目判讀達到帳號額度或速率限制，請稍後再試。"
         : `題目 PDF 判讀失敗（HTTP ${response.status}）。`);
     const context = normalizeQuestionContext(parseJsonContent(extractText(await response.json())), document);
-    if (!context.requirements.length && !context.siteConditions.length) throw new Error("模型未能從題目 PDF 抽出需求或基地條件。");
+    if (!context.requirements.length && !context.siteConditions.length && !context.scoringItems.length) {
+      context.uncertainties = [...context.uncertainties, "題目 PDF 的需求、基地條件與動態給分項抽取不足；評分改用平台備用準則。"].slice(0, 30);
+      context.confidence = Math.min(context.confidence, 0.25);
+    }
     if (questionContextCache.size >= 24) questionContextCache.delete(questionContextCache.keys().next().value || "");
     questionContextCache.set(key, context);
     return context;
@@ -228,8 +246,15 @@ export class CliProxyReviewProvider implements ReviewProvider {
     const dataUrl = await fileToDataUrl(input.file);
     const imageDimensions = await readImageDimensions(input.file);
     const modelToUse = await resolveCliProxyModel(input.model);
-    const questionContext = input.questionDocument
-      ? await readQuestionWithCli(this.baseUrl, modelToUse, input.questionDocument) : null;
+    let questionContext: QuestionContext | null = null;
+    if (input.questionDocument) {
+      try {
+        questionContext = await readQuestionWithCli(this.baseUrl, modelToUse, input.questionDocument);
+      } catch {
+        questionContext = normalizeQuestionContext({ confidence: 0.2,
+          uncertainties: ["題目 PDF 動態給分項、標準或配分上限抽取失敗；評分改用平台備用準則。"] }, input.questionDocument);
+      }
+    }
     const scenario = input.scenario || "design_8h";
     const targetMinutes = normalizeReviewMinutes(input.targetMinutes, scenario);
     const intensity = input.intensity || (scenario === "quick_study" ? "gentle" : scenario === "design_8h" ? "strict" : "standard");
@@ -331,6 +356,26 @@ export class CliProxyReviewProvider implements ReviewProvider {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  async rescoreDimensions(input: TargetedRescoreInput): Promise<ReviewDimension[]> {
+    if (!input.dimensions.length) return [];
+    const dataUrl = await fileToDataUrl(input.file);
+    const modelToUse = await resolveCliProxyModel(input.model);
+    const scenario = input.scenario || "design_8h";
+    const knowledge = await retrieveKnowledge([
+      input.updatedIssue.title, input.updatedIssue.description, input.updatedIssue.criterion || "",
+      ...input.dimensions.map((dimension) => `${dimension.label} ${dimension.criterion || ""}`)
+    ].join(" "), input.examType || (scenario === "site_4h" ? "site_planning" : "design"), 8,
+    input.dimensions.map((dimension) => dimension.key));
+    const result = await callCliVision(this.baseUrl, modelToUse,
+      `你是建築審圖結構化評分員。只評估提供的局部裁切圖與指定給分項；不重新審核全圖。\n${targetedRescorePrompt(input, knowledge)}`,
+      "請根據本次局部圖，僅回傳需要更新的 dimensions JSON。不要評論整張圖。", dataUrl, 3000);
+    const sourceRefs = new Set([...knowledge.map((item) => item.id),
+      ...input.dimensions.flatMap((dimension) => dimension.sourceRefs || []),
+      ...input.relatedIssues.flatMap((issue) => issue.sourceRefs || []),
+      ...(input.previousIssue.sourceRefs || []), ...(input.updatedIssue.sourceRefs || [])]);
+    return normalizeTargetedDimensionUpdates(result, input, sourceRefs);
   }
 }
 

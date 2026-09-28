@@ -26,19 +26,13 @@ export type ResolvedReviewRubric = {
   sourceLabel: string;
 };
 
-const platformReferenceItems: ResolvedReviewRubricItem[] = [
-  { key: "brief", section: "平台參考", label: "題意與機能需求", criterion: "核對題目目標、空間計畫與必要需求。", maxScore: null, source: "platform_reference" },
-  { key: "site", section: "平台參考", label: "基地紋理與建築計畫", criterion: "核對基地條件、鄰里界面與配置策略。", maxScore: null, source: "platform_reference" },
-  { key: "spatial", section: "平台參考", label: "空間層次與公共性", criterion: "核對室內外、開放程度及公共與私密層次。", maxScore: null, source: "platform_reference" },
-  { key: "circulation", section: "平台參考", label: "入口與動線", criterion: "核對主要到達、入口辨識與人車服務動線。", maxScore: null, source: "platform_reference" },
-  { key: "representation", section: "平台參考", label: "圖面可讀性與論證", criterion: "核對應交圖說、標註與設計論證是否可讀。", maxScore: null, source: "platform_reference" }
+const platformFallbackItems: ResolvedReviewRubricItem[] = [
+  { key: "brief", section: "平台備用準則", label: "題意與建築計畫", criterion: "題目目標、機能需求、空間數量與使用者情境均有回應，且計畫關係清楚。", maxScore: 20, source: "platform_reference" },
+  { key: "site", section: "平台備用準則", label: "基地回應與配置", criterion: "建築配置回應基地邊界、道路、鄰里、方位、地形及公共界面。", maxScore: 20, source: "platform_reference" },
+  { key: "spatial", section: "平台備用準則", label: "空間組織與公共性", criterion: "室內外層次、開放程度、空間序列與公共至私密的轉換合理。", maxScore: 25, source: "platform_reference" },
+  { key: "circulation", section: "平台備用準則", label: "入口、動線與使用", criterion: "主要入口易辨識，人行、車行、服務與無障礙動線關係清楚。", maxScore: 20, source: "platform_reference" },
+  { key: "representation", section: "平台備用準則", label: "圖面完整度與設計論證", criterion: "圖說符合題目要求，平立剖與標註可讀，設計策略有圖面證據支持。", maxScore: 15, source: "platform_reference" }
 ];
-
-function groupedItem(key: string, section: string, label: string, criteria: string[], source: ReviewRubricSource): ResolvedReviewRubricItem | null {
-  const filtered = criteria.map((item) => item.trim()).filter(Boolean).slice(0, 20);
-  if (!filtered.length) return null;
-  return { key, section, label, criterion: filtered.join("；"), maxScore: null, source };
-}
 
 function uniqueKeys(items: ResolvedReviewRubricItem[]) {
   const used = new Set<string>();
@@ -60,37 +54,24 @@ export function resolveReviewRubric(questionContext?: QuestionContext | null, pr
       maxScore: item.maxScore,
       source: "question_explicit" as const
     })));
-    const scoredCount = items.filter((item) => item.maxScore !== null).length;
-    const mode: ReviewScoringMode = scoredCount === items.length
-      ? "question_points" : scoredCount ? "question_mixed" : "question_criteria";
-    return { items, mode,
-      totalMaxScore: mode === "question_points"
-        ? items.reduce((sum, item) => sum + (item.maxScore || 0), 0) : null,
+    const hasCompleteQuestionRubric = questionContext.confidence >= 0.6 && items.length > 0 && items.every((item) => {
+      const source = questionContext.scoringItems.find((candidate) => candidate.key === item.key);
+      const hasStandard = Boolean(source?.criteria.some((criterion) => criterion.trim()) ||
+        source?.sourceText.trim() && source.sourceText.trim().length >= item.label.trim().length + 8);
+      return item.maxScore !== null && item.maxScore > 0 && hasStandard &&
+        (source?.confidence ?? 0) >= 0.55;
+    });
+    if (hasCompleteQuestionRubric) return { items, mode: "question_points",
+      totalMaxScore: items.reduce((sum, item) => sum + (item.maxScore || 0), 0),
       sourceLabel: "題目明示的給分項目" };
   }
-
-  if (questionContext) {
-    const items = [
-      groupedItem("question-program", "題目要求", "建築計畫與需求", questionContext.requirements, "question_deliverable"),
-      groupedItem("question-drawings", "題目要求", "應交圖說", questionContext.drawingRequirements, "question_deliverable"),
-      groupedItem("question-constraints", "題目要求", "限制條件", questionContext.constraints, "question_deliverable")
-    ].filter((item): item is ResolvedReviewRubricItem => item !== null);
-    if (items.length) return { items, mode: "question_criteria", totalMaxScore: null,
-      sourceLabel: "題目未列配分，依題目要求檢核" };
-  }
-
-  if (practiceQuestion) {
-    const items = [
-      groupedItem("practice-program", "模擬題", "建築計畫與機能", practiceQuestion.program, "practice_question"),
-      groupedItem("practice-tasks", "模擬題", "設計課題", practiceQuestion.designTasks, "practice_question"),
-      groupedItem("practice-drawings", "模擬題", "應交圖說", practiceQuestion.drawingRequirements, "practice_question")
-    ].filter((item): item is ResolvedReviewRubricItem => item !== null);
-    if (items.length) return { items, mode: "question_criteria", totalMaxScore: null,
-      sourceLabel: "模擬題要求（未設定配分）" };
-  }
-
-  return { items: platformReferenceItems.map((item) => ({ ...item })), mode: "platform_reference",
-    totalMaxScore: null, sourceLabel: "未提供題目評分項目，僅作平台檢核" };
+  const fallbackReason = questionContext?.scoringItems?.length
+    ? "題目給分項、標準或配分上限未能完整抽取，已改用平台備用評分準則"
+      : questionContext ? "題目 PDF 未能提供完整的動態給分項，已改用平台備用評分準則"
+        : practiceQuestion ? "模擬題未設定配分，已改用平台備用評分準則"
+        : "未提供可用的題目給分項，已改用平台備用評分準則";
+  return { items: platformFallbackItems.map((item) => ({ ...item })), mode: "platform_fallback",
+    totalMaxScore: 100, sourceLabel: fallbackReason };
 }
 
 function assessmentFromRatio(score: number, maxScore: number): ReviewAssessment {
@@ -145,7 +126,7 @@ export function calibrateReview(review: DrawingReview, _brief: string, observati
     };
   });
 
-  const fullyScored = rubric.mode === "question_points" && dimensions.length > 0 &&
+  const fullyScored = (rubric.mode === "question_points" || rubric.mode === "platform_fallback") && dimensions.length > 0 &&
     dimensions.every((item) => item.score !== null && item.maxScore !== null);
   const overallScore = fullyScored
     ? dimensions.reduce((sum, item) => sum + (item.score || 0), 0) : null;
@@ -159,6 +140,9 @@ export function calibrateReview(review: DrawingReview, _brief: string, observati
   if (rubric.mode === "question_points") notes.push(fullyScored
     ? `總分由 ${dimensions.length} 個題目配分直接加總，未從意見卡倒扣`
     : "部分給分項證據不足，暫不加總總分");
+  if (rubric.mode === "platform_fallback") notes.push(fullyScored
+    ? "依平台自訂備用準則直接加總（20／20／25／20／15 分），非題目官方配分"
+    : "平台備用準則有分項證據不足，暫不加總總分");
   if (rubric.mode === "question_mixed") notes.push("題目只有部分項目標明配分，為避免錯誤分母，本次不加總總分");
   if (rubric.mode === "question_criteria") notes.push("題目未明載各項上限，改顯示達成狀態，不自行平均配分");
   if (rubric.mode === "platform_reference") notes.push("未提供題目 rubric，不顯示假定百分制分數");

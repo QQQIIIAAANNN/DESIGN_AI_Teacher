@@ -158,7 +158,8 @@ export type ReviewScoringMode =
   | "question_points"
   | "question_mixed"
   | "question_criteria"
-  | "platform_reference";
+  | "platform_reference"
+  | "platform_fallback";
 
 export type ReviewDimension = {
   key: string;
@@ -169,6 +170,7 @@ export type ReviewDimension = {
   maxScore: number | null;
   assessment?: ReviewAssessment;
   rubricSource?: ReviewRubricSource;
+  scoreNeedsUpdate?: boolean;
   relatedIssueIds?: string[];
   confidence: number;
   evidenceConfidence?: number;

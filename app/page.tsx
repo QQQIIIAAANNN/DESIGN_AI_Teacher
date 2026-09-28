@@ -5,6 +5,7 @@ import type {
   DrawingReview,
   ConfirmedRegion,
   ReviewItem,
+  ReviewDimension,
   ReviewFeedbackDraft,
   DiscussionMessage,
   ReviewSeverity,
@@ -15,9 +16,7 @@ import type { ReviewIntensity } from "@/lib/review-provider";
 import { questionBankCatalog, type ProjectQuestion, type QuestionCategory } from "@/data/question-bank";
 import type { QuestionDocument } from "@/lib/question-source";
 import type { ObservationOverrides } from "@/lib/review-observation";
-import { calibrateReview } from "@/lib/review-rubric";
 import { normalizeConfirmedRegions } from "@/lib/review-grounding";
-import { questionContextText } from "@/lib/question-context";
 import { isPracticeQuestion, type PracticeQuestion, type PracticeQuestionMode } from "@/lib/practice-question";
 import { renderPracticeSiteSvg } from "@/lib/practice-site";
 import { getReviewScenario, isReviewScenarioId, normalizeReviewMinutes, reviewScenarios,
@@ -42,7 +41,8 @@ import {
   generateIssueSuggestionImage,
   cropIssueImage,
   reviewDrawingWithAi,
-  reviewSupplementWithAi
+  reviewSupplementWithAi,
+  rescoreReviewDimensionsWithAi
 } from "@/lib/ai-proxy-client";
 import { normalizeSuggestionPlan, renderSuggestionSvg } from "@/lib/suggestion-svg";
 import ReviewFeedbackPanel, { type FeedbackSaveState } from "./review-feedback";
@@ -59,7 +59,8 @@ const scoringModeLabels = {
   question_points: "依題目配分",
   question_mixed: "題目部分配分",
   question_criteria: "依題目項目檢核",
-  platform_reference: "平台參考檢核"
+  platform_reference: "平台參考檢核",
+  platform_fallback: "平台備用評分（非官方配分）"
 } as const;
 
 const severityLabels: Record<ReviewSeverity, string> = {
@@ -250,7 +251,8 @@ function importedReviewOrNull(value: unknown): DrawingReview | null {
     overallScore: typeof review.overallScore === "number" ? review.overallScore : null,
     overallMaxScore: typeof review.overallMaxScore === "number" ? review.overallMaxScore : null,
     scoringMode: review.scoringMode === "question_points" || review.scoringMode === "question_mixed" ||
-      review.scoringMode === "question_criteria" || review.scoringMode === "platform_reference"
+      review.scoringMode === "question_criteria" || review.scoringMode === "platform_reference" ||
+      review.scoringMode === "platform_fallback"
       ? review.scoringMode : undefined,
     dimensions: review.dimensions.map((item) => ({ ...item,
       sourceRefs: Array.isArray(item.sourceRefs) ? item.sourceRefs.filter((ref): ref is string => typeof ref === "string").slice(0, 8) : [],
@@ -598,6 +600,92 @@ export default function Home() {
     }
   }
 
+  async function updateLinkedDimensionScores(currentReview: DrawingReview, previousIssue: ReviewItem,
+    updatedIssue: ReviewItem, cropFile: File): Promise<DrawingReview> {
+    const targetDimensions = currentReview.dimensions.filter((dimension) =>
+      updatedIssue.rubricRefs?.includes(dimension.key) || previousIssue.rubricRefs?.includes(dimension.key) ||
+      dimension.relatedIssueIds?.includes(previousIssue.id));
+    const issues = currentReview.issues.map((item) => item.id === updatedIssue.id ? updatedIssue : item);
+    if (!targetDimensions.length) return { ...currentReview, issues,
+      scoreNote: `${currentReview.scoreNote || ""} 此意見尚未連結給分項，分項分數未變動。` };
+
+    const linkedKeys = new Set(targetDimensions.map((dimension) => dimension.key));
+    const relatedIds = new Set([previousIssue.id, updatedIssue.id,
+      ...targetDimensions.flatMap((dimension) => dimension.relatedIssueIds || [])]);
+    const relatedIssues = issues.filter((item) => relatedIds.has(item.id) ||
+      item.rubricRefs?.some((key) => linkedKeys.has(key)));
+    const context = { previousIssue, updatedIssue, dimensions: targetDimensions, relatedIssues };
+    const localModel = isLocalModelReady
+      ? currentReview.model && detectedModels.includes(currentReview.model) ? currentReview.model : selectedModel
+      : null;
+    try {
+      let updates: ReviewDimension[];
+      if (localModel) {
+        const form = new FormData();
+        form.append("crop", cropFile);
+        form.append("previousIssue", JSON.stringify(previousIssue));
+        form.append("updatedIssue", JSON.stringify(updatedIssue));
+        form.append("dimensions", JSON.stringify(targetDimensions));
+        form.append("relatedIssues", JSON.stringify(relatedIssues));
+        form.append("model", localModel);
+        form.append("intensity", currentReview.intensity || selectedIntensity);
+        form.append("scenario", currentReview.scenario || selectedScenario);
+        const response = await fetch("/api/review/rescore", { method: "POST", body: form,
+          headers: await reviewApiHeaders() });
+        const payload = await response.json() as { dimensions?: ReviewDimension[]; error?: string };
+        if (!response.ok || !Array.isArray(payload.dimensions)) throw new Error(payload.error || "關聯給分項局部重評失敗。");
+        updates = payload.dimensions;
+      } else if (liveReviewEnabled) {
+        updates = await rescoreReviewDimensionsWithAi(cropFile, context, {
+          model: currentReview.model, scenario: currentReview.scenario || selectedScenario,
+          intensity: currentReview.intensity || selectedIntensity,
+          examType: (currentReview.scenario || selectedScenario) === "site_4h" ? "site_planning" : "design"
+        });
+      } else {
+        throw new Error(proxyStatus?.message || "目前沒有可用模型，關聯給分項尚未重評。");
+      }
+      const updateByKey = new Map(updates.map((dimension) => [dimension.key, dimension]));
+      if (targetDimensions.some((dimension) => !updateByKey.has(dimension.key))) {
+        throw new Error("局部評分未完整回傳所有關聯給分項。");
+      }
+      const dimensions = currentReview.dimensions.map((dimension) => updateByKey.get(dimension.key) || dimension);
+      const sumMode = currentReview.scoringMode === "question_points" || currentReview.scoringMode === "platform_fallback";
+      const allScored = sumMode && dimensions.length > 0 && dimensions.every((dimension) =>
+        dimension.score !== null && dimension.maxScore !== null && !dimension.scoreNeedsUpdate);
+      const overallScore = allScored ? dimensions.reduce((sum, dimension) => sum + (dimension.score || 0), 0)
+        : sumMode ? null : currentReview.overallScore;
+      const overallMaxScore = sumMode && dimensions.length && dimensions.every((dimension) => dimension.maxScore !== null)
+        ? dimensions.reduce((sum, dimension) => sum + (dimension.maxScore || 0), 0) : currentReview.overallMaxScore;
+      return { ...currentReview, issues, dimensions, overallScore, overallMaxScore, scoreStale: false,
+        scoreNote: `${currentReview.scoreNote || ""} 已只更新「${targetDimensions.map((dimension) => dimension.label).join("、")}」；其餘給分項與原審查維持不變。` };
+    } catch (error) {
+      const dimensions = currentReview.dimensions.map((dimension) => targetDimensions.some((target) => target.key === dimension.key)
+        ? { ...dimension, scoreNeedsUpdate: true,
+          relatedIssueIds: [...new Set([...(dimension.relatedIssueIds || []), updatedIssue.id])] } : dimension);
+      const sumMode = currentReview.scoringMode === "question_points" || currentReview.scoringMode === "platform_fallback";
+      return { ...currentReview, issues, dimensions, overallScore: sumMode ? null : currentReview.overallScore,
+        scoreStale: false,
+        scoreNote: `${currentReview.scoreNote || ""} 意見已修正，但僅其關聯分項局部重評失敗：${error instanceof Error ? error.message : "請稍後重試"}。其他分項未重新審核。` };
+    }
+  }
+
+  async function retryLinkedDimensionScore(dimension: ReviewDimension) {
+    if (!review || !imageUrl || !dimension.scoreNeedsUpdate) return;
+    const issueId = dimension.relatedIssueIds?.find((id) => review.issues.some((item) => item.id === id));
+    const issue = review.issues.find((item) => item.id === issueId);
+    if (!issue) return;
+    try {
+      const cropUrl = await cropIssueImage(imageUrl, issue.bbox);
+      const cropBlob = await (await fetch(cropUrl)).blob();
+      const cropFile = new File([cropBlob], "score-retry-crop.png", { type: "image/png" });
+      const nextReview = await updateLinkedDimensionScores(review, issue, issue, cropFile);
+      setReview(nextReview);
+      if (persistedReview) await updatePersistedReviewPayload(persistedReview.sessionId, nextReview);
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "局部分項重試失敗。");
+    }
+  }
+
   async function handleDiscuss(issue: ReviewItem) {
     const message = (discussionDrafts[issue.id] || "").trim();
     if (!message || !imageUrl || discussionBusyId) return;
@@ -612,8 +700,9 @@ export default function Home() {
     try {
       const cropUrl = await cropIssueImage(imageUrl, issue.bbox);
       const cropBlob = await (await fetch(cropUrl)).blob();
+      const cropFile = new File([cropBlob], "card-region.png", { type: "image/png" });
       const form = new FormData();
-      form.append("crop", new File([cropBlob], "card-region.png", { type: "image/png" }));
+      form.append("crop", cropFile);
       form.append("issue", JSON.stringify(issue));
       form.append("history", JSON.stringify(discussions[issue.id] || []));
       form.append("message", message);
@@ -662,12 +751,22 @@ export default function Home() {
         { role: "user", text: message }, { role: "assistant", text: payload.reply, verdict: payload.verdict }] }));
       setDiscussionDrafts((current) => ({ ...current, [issue.id]: "" }));
       if (payload.verdict === "revised" && payload.revisedIssue?.id === issue.id) {
-        const nextReview = review ? { ...review, overallScore: null, scoreStale: true,
-          scoreNote: "卡片討論已修正一項判讀；請重新完整審圖後更新分數。",
-          issues: review.issues.map((item) => item.id === issue.id ? payload.revisedIssue as ReviewItem : item) } : null;
-        if (nextReview) {
+        if (review) {
+          const nextReview = await updateLinkedDimensionScores(review, issue, payload.revisedIssue, cropFile);
           setReview(nextReview);
-          setPersistenceNotice("卡片討論與修正僅保存在本機頁面；可匯出工作檔保存。總分請重新完整審圖更新。");
+          setPersistenceNotice(nextReview.dimensions.some((dimension) => dimension.scoreNeedsUpdate &&
+            dimension.relatedIssueIds?.includes(issue.id))
+            ? "意見已修正；只有關聯給分項待重試，其他分項保留原審查結果。"
+            : "意見修正及其關聯給分項已局部更新；其他分項保留原審查結果。");
+          if (persistedReview) {
+            try {
+              const findingId = persistedReview.findingIds[issue.id];
+              if (findingId) await updatePersistedReviewFinding(persistedReview.sessionId, findingId, payload.revisedIssue);
+              await updatePersistedReviewPayload(persistedReview.sessionId, nextReview);
+            } catch (error) {
+              setPersistenceNotice(error instanceof Error ? `局部更新已完成，但雲端紀錄更新失敗：${error.message}` : "局部更新已完成，但雲端紀錄更新失敗。");
+            }
+          }
         }
       }
     } catch (error) {
@@ -1212,15 +1311,15 @@ export default function Home() {
           (currentIssue) => currentIssue.kind === "clarity_request" || currentIssue.locationUnresolved
         )
       };
-      if (nextReview.observations) {
-        nextReview = calibrateReview(nextReview, nextReview.questionContext ? questionContextText(nextReview.questionContext) : "",
-          nextReview.observations, nextReview.questionContext?.confidence);
+      if (result.status === "resolved") {
+        nextReview = await updateLinkedDimensionScores(review, issue, updatedIssue, file);
+      } else {
+        nextReview = { ...nextReview,
+          scoreNote: `${review.scoreNote || ""} 局部證據仍不足；原有給分項分數維持，待此意見確認後再局部更新。` };
       }
-      nextReview = { ...nextReview, overallScore: null, scoreStale: true,
-        scoreNote: "局部判讀已更新此項意見；相關題目給分項需重新完整審圖後更新。" };
       setReview(nextReview);
 
-      if (liveReviewEnabled && persistedReview?.findingIds[issue.id]) {
+      if (persistedReview?.findingIds[issue.id]) {
         try {
           await updatePersistedReviewFinding(
             persistedReview.sessionId,
@@ -1245,7 +1344,10 @@ export default function Home() {
           status: result.status === "resolved" ? "resolved" : "uncertain",
           message:
             result.status === "resolved"
-              ? "已用局部圖完成精審並回寫原問題。"
+              ? nextReview.dimensions.some((dimension) => dimension.scoreNeedsUpdate &&
+                  dimension.relatedIssueIds?.includes(issue.id))
+                ? "意見已修正；僅關聯給分項待局部重試，其他分項未重審。"
+                : "已用局部圖完成精審，並只更新此意見關聯的給分項。"
               : "資訊仍不足，建議再補一張更清楚的局部圖。"
         }
       }));
@@ -1996,7 +2098,7 @@ export default function Home() {
                     {discussionOpenId === issue.id && <section className="issue-discussion"
                       aria-label={`${issue.title}的討論`} onClick={(event) => event.stopPropagation()}>
                       <div className="discussion-heading"><strong>針對這項意見討論</strong>
-                        <span>模型會重新看此處局部圖；若修正判讀，總分需重評。對話可隨工作檔匯出。</span></div>
+                        <span>模型只重看此處局部圖；若修正判讀，只更新關聯給分項。對話可隨工作檔匯出。</span></div>
                       <div id={`discussion-log-${issue.id}`} className="discussion-messages" role="log">
                         {(discussions[issue.id] || []).length ? discussions[issue.id].map((entry, messageIndex) =>
                           <div key={messageIndex} className={`discussion-message ${entry.role}`}>
@@ -2197,14 +2299,16 @@ export default function Home() {
             <span className="step">04</span>
             <h2 id="score-title">結構化評分</h2>
           </div>
-          <span className="issue-count">{review?.scoreStale ? "等待重新評分" : review?.scoringMode
+          <span className="issue-count">{review?.scoreStale ? "等待重新評分" : review?.dimensions.some((dimension) => dimension.scoreNeedsUpdate)
+            ? "局部分項待更新" : review?.scoringMode
             ? scoringModeLabels[review.scoringMode] : review ? "本次審圖" : "等待審圖"}</span>
         </div>
         <div className="score-summary-body">
           <div className={`score-big ${review && review.overallScore === null ? "is-qualitative" : ""}`}>
-            <strong>{review?.scoreStale ? "待更新" : review?.overallScore ?? (review ? "不加總" : "--")}</strong>
+            <strong>{review?.scoreStale ? "待更新" : review?.dimensions.some((dimension) => dimension.scoreNeedsUpdate)
+              ? "局部待更新" : review?.overallScore ?? (review ? "不加總" : "--")}</strong>
             <span>{!review ? "等待審圖" : review.overallScore !== null && review.overallMaxScore
-              ? `/ ${review.overallMaxScore} 題目配分` : "依分項達成狀態"}</span>
+              ? `/ ${review.overallMaxScore} 分` : "依分項達成狀態"}</span>
           </div>
           {review?.scoreNote && <p className="score-note">{review.scoreNote}</p>}
           {review?.scoreStale && <button className="secondary-action rescore-action" type="button" disabled={isReviewing} onClick={() => void handleReview()}>
@@ -2215,8 +2319,8 @@ export default function Home() {
             {displayDimensions.map((dimension) => {
               const scoreValue = !review?.scoreStale && typeof dimension.score === "number" ? dimension.score : null;
               const maxValue = typeof dimension.maxScore === "number" ? dimension.maxScore : null;
-              const hasScore = scoreValue !== null && maxValue !== null;
-              const assessment = review?.scoreStale ? "unverified" : dimension.assessment || "unverified";
+              const hasScore = scoreValue !== null && maxValue !== null && !dimension.scoreNeedsUpdate;
+              const assessment = review?.scoreStale || dimension.scoreNeedsUpdate ? "unverified" : dimension.assessment || "unverified";
               const relatedIssues = (dimension.relatedIssueIds || []).flatMap((id) => {
                 const issue = issues.find((item) => item.id === id);
                 return issue ? [issue] : [];
@@ -2232,12 +2336,16 @@ export default function Home() {
                     {maxValue !== null && <div className="meter" aria-hidden="true"><i style={{
                       width: hasScore ? `${(scoreValue / maxValue) * 100}%` : "0%"
                     }} /></div>}
-                    <b>{hasScore ? `${scoreValue}/${maxValue}` : maxValue !== null
-                      ? `待評 / ${maxValue}` : assessmentLabels[assessment]}</b>
+                    <b>{dimension.scoreNeedsUpdate && maxValue !== null
+                      ? `待局部更新（原 ${scoreValue ?? "--"}/${maxValue}）`
+                      : hasScore ? `${scoreValue}/${maxValue}` : maxValue !== null
+                        ? `待評 / ${maxValue}` : assessmentLabels[assessment]}</b>
                     {hasScore && <span className={`assessment assessment-${assessment}`}>{assessmentLabels[assessment]}</span>}
+                    {dimension.scoreNeedsUpdate && <button className="secondary-action dimension-rescore-action" type="button"
+                      onClick={() => void retryLinkedDimensionScore(dimension)}>重試此關聯分項</button>}
                   </div>
                   <div className="dimension-detail">
-                    {dimension.criterion && <p><strong>題目標準</strong>{dimension.criterion}</p>}
+                    {dimension.criterion && <p><strong>{dimension.rubricSource === "platform_reference" ? "平台備用準則" : "題目標準"}</strong>{dimension.criterion}</p>}
                     <p><strong>判斷理由</strong>{dimension.rationale || "理由待補"}</p>
                     <p><strong>圖面證據</strong>{dimension.evidence || "目前證據不足"}</p>
                     <small>證據信心 {Math.round((dimension.evidenceConfidence ?? dimension.confidence) * 100)}%
@@ -2260,7 +2368,7 @@ export default function Home() {
                 </article>
               );
             })}
-            {!displayDimensions.length && <div className="score-empty">完成審圖後，這裡會依題目實際給分項顯示；沒有明確配分時不會自行補成百分制。</div>}
+            {!displayDimensions.length && <div className="score-empty">完成審圖後依題目給分項評分；若題目配分抽取失敗，會改用清楚標示的 100 分平台備用準則。</div>}
           </div>
         </div>
       </section>

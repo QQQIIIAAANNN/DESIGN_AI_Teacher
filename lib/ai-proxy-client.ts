@@ -6,6 +6,7 @@ import type {
   NormalizedBBox,
   RedlinePrimitive,
   ReviewItem,
+  ReviewDimension,
   ReviewCoverage,
   ReviewSeverity,
   SupplementReviewResult,
@@ -19,6 +20,7 @@ import { questionReadingPrompt, normalizeQuestionContext, questionContextText, t
 import type { QuestionDocument } from "@/lib/question-source";
 import { practiceQuestionText, type PracticeQuestion } from "@/lib/practice-question";
 import { normalizeReviewMinutes, reviewScenarioInstruction, type ReviewScenarioId } from "@/lib/review-scenario";
+import { normalizeTargetedDimensionUpdates, targetedRescorePrompt, type ReviewRescoreContext } from "@/lib/review-score-update";
 import {
   callAiProxy,
   getSavedSession,
@@ -570,22 +572,29 @@ export async function reviewDrawingWithAi(file: File, options: {
   let questionContext: QuestionContext | null = null;
   if (options.questionDocument) {
     const document = options.questionDocument;
-    const questionResponse = await callAiProxy(session, {
-      action: "chat", model,
-      messages: [
-        { role: "system", content: questionReadingPrompt },
-        { role: "user", content: [
-          { type: "text", text: `題目：${document.title}\n抽取文字：\n${document.text.slice(0, 22000)}\n請結合下列題目頁面及基地附圖閱讀。` },
-          ...document.pageImages.flatMap((url, index) => [
-            { type: "text" as const, text: `題目 PDF 第 ${index + 1} 頁` },
-            { type: "image_url" as const, image_url: { url, detail: "high" as const } }
-          ])
-        ] }
-      ]
-    });
-    questionContext = normalizeQuestionContext(parseJsonContent(extractText(questionResponse)), document);
-    if (!questionContext.requirements.length && !questionContext.siteConditions.length) {
-      throw new Error("模型未能從題目 PDF 讀出需求或基地條件。");
+    try {
+      const questionResponse = await callAiProxy(session, {
+        action: "chat", model,
+        messages: [
+          { role: "system", content: questionReadingPrompt },
+          { role: "user", content: [
+            { type: "text", text: `題目：${document.title}\n抽取文字：\n${document.text.slice(0, 22000)}\n請結合下列題目頁面及基地附圖閱讀。` },
+            ...document.pageImages.flatMap((url, index) => [
+              { type: "text" as const, text: `題目 PDF 第 ${index + 1} 頁` },
+              { type: "image_url" as const, image_url: { url, detail: "high" as const } }
+            ])
+          ] }
+        ]
+      });
+      questionContext = normalizeQuestionContext(parseJsonContent(extractText(questionResponse)), document);
+      if (!questionContext.requirements.length && !questionContext.siteConditions.length && !questionContext.scoringItems.length) {
+        questionContext.uncertainties = [...questionContext.uncertainties,
+          "題目 PDF 的需求、基地條件與動態給分項抽取不足；評分改用平台備用準則。"].slice(0, 30);
+        questionContext.confidence = Math.min(questionContext.confidence, 0.25);
+      }
+    } catch {
+      questionContext = normalizeQuestionContext({ confidence: 0.2,
+        uncertainties: ["題目 PDF 動態給分項、標準或配分上限抽取失敗；評分改用平台備用準則。"] }, document);
     }
   }
   const observationResponse = await callAiProxy(session, {
@@ -705,6 +714,47 @@ export function cropIssueImage(imageUrl: string, bbox: NormalizedBBox) {
       reject(new Error("無法準備問題區域的局部圖。"));
     }
   });
+}
+
+export async function rescoreReviewDimensionsWithAi(file: File, context: ReviewRescoreContext, options: {
+  model?: string;
+  scenario?: ReviewScenarioId;
+  intensity?: "gentle" | "standard" | "strict";
+  examType?: "design" | "site_planning";
+} = {}): Promise<ReviewDimension[]> {
+  if (!isLiveReviewConfigured()) throw new Error("尚未設定正式 AI 審圖模型。");
+  if (file.size > 8 * 1024 * 1024) throw new Error("局部重評目前接受 8 MB 以下圖檔。");
+  if (!context.dimensions.length) return [];
+  const session = await getSavedSession();
+  if (!session || !isActiveMember(session.user)) {
+    throw new Error("請先用已核准的帳號登入，再更新結構化評分。");
+  }
+  const dataUrl = await fileToDataUrl(file);
+  if (!/^data:image\/(png|jpeg|webp);base64,/i.test(dataUrl)) {
+    throw new Error("局部重評目前接受 PNG、JPEG 或 WebP。");
+  }
+  const scenario = options.scenario || "design_8h";
+  const knowledge = await fetchReviewKnowledge([
+    context.updatedIssue.title, context.updatedIssue.description, context.updatedIssue.criterion || "",
+    ...context.dimensions.map((dimension) => `${dimension.label} ${dimension.criterion || ""}`)
+  ].join(" "), options.examType || (scenario === "site_4h" ? "site_planning" : "design"), 8,
+  context.dimensions.map((dimension) => dimension.key));
+  const response = await callAiProxy(session, {
+    action: "chat",
+    model: options.model || (process.env.NEXT_PUBLIC_REVIEW_MODEL || "").trim(),
+    messages: [
+      { role: "system", content: `你是建築圖面結構化評分員。只能更新指定的關聯給分項，不得重新審整張圖。\n${targetedRescorePrompt(context, knowledge)}` },
+      { role: "user", content: [
+        { type: "text", text: "以下僅是原圖中問題附近的裁切區。只根據可見證據，回傳 JSON。" },
+        { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
+      ] }
+    ]
+  });
+  const allowedRefs = new Set([...knowledge.map((item) => item.id),
+    ...context.dimensions.flatMap((dimension) => dimension.sourceRefs || []),
+    ...context.relatedIssues.flatMap((issue) => issue.sourceRefs || []),
+    ...(context.previousIssue.sourceRefs || []), ...(context.updatedIssue.sourceRefs || [])]);
+  return normalizeTargetedDimensionUpdates(parseJsonContent(extractText(response)), context, allowedRefs);
 }
 
 export async function generateIssueSuggestionImage(imageUrl: string, issue: ReviewItem) {
