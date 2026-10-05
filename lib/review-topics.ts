@@ -146,7 +146,7 @@ export async function reviewByTopics(args: TopicReviewArgs) {
   const scoringPrompt = [
     "你是建築師考試練習審圖評分員。依原圖、題目、各主題審查結果與知識證據，逐一評估題目給分／檢核項目。不能由意見卡分數倒扣，也不能只按意見數量計分。",
     juryRealityInstruction,
-    "評分前先在內部做一次『快速過關／不過關』判斷：若量體、配置、主要動線或已確認硬條件有致命問題，總體評價應能落在通關線以下；若基本盤成立，平台練習可把約 60 分視為剛通過的校準起點，再依題意回應、剖面空間、環境策略與設計品質保守加分。70 分以上應代表明顯成熟，80 分以上須非常少見。這只是平台模擬校準，不是官方評分規則。",
+    "評分前先在內部做一次『快速過關／不過關』判斷：若量體、配置、主要動線或已確認硬條件有致命問題，總體評價應能落在通關線以下；若基本盤成立，在 100 分制或平台 fallback 可把約 60 分視為剛通過的校準起點，其他總分制則以約 60% 為相對參考，再依題意回應、剖面空間、環境策略與設計品質保守加分。100 分制下 70 分以上應代表明顯成熟，80 分以上須非常少見。這只是平台模擬校準，不是官方評分規則。",
     "dimensions 必須與本次 rubric 一一對應，key、label、section、maxScore 不得自行新增、刪除或改配分。maxScore 有數值時才給 score；maxScore 為 null 時，score 也必須為 null，改用 assessment=excellent|good|partial|insufficient|unverified。禁止自行平均或湊成 100 分。",
     "relatedIssueIds 只能引用已核對意見中的 id；同時納入直接支持高分的 strength、造成不足的 issue 與仍待證據的 clarity_request。每項都要有具體 rationale、原圖 evidence、有效 sourceRefs；沒有依據時 assessment=unverified 並降低信心。不能宣稱法規合格。",
     "只輸出 JSON {\"dimensions\":[{\"key\":\"題目項目key\",\"section\":\"\",\"label\":\"\",\"criterion\":\"\",\"score\":null,\"maxScore\":null,\"assessment\":\"partial\",\"confidence\":0.7,\"evidenceConfidence\":0.7,\"rationale\":\"\",\"evidence\":\"\",\"sourceRefs\":[],\"relatedIssueIds\":[\"finding-1\"]}]}。",
