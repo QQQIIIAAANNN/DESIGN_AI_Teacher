@@ -70,20 +70,20 @@ const severityLabels: Record<ReviewSeverity, string> = {
   info: "待確認"
 };
 
-type IssueGroupKey = "critical" | "medium" | "light" | "good";
+type IssueGroupKey = "gate" | "core" | "polish" | "good";
 
 const issueGroupDefinitions: Array<{ key: IssueGroupKey; label: string; description: string }> = [
-  { key: "critical", label: "最嚴重", description: "先處理最影響題意、安全、動線或通關的問題" },
-  { key: "medium", label: "中等", description: "接著修正核心空間關係，也包含需要補證據的判斷" },
-  { key: "light", label: "輕度", description: "不影響主要解題，有時間再微調" },
-  { key: "good", label: "良好（保持）", description: "已有圖面證據的有效做法，修改時請保留" }
+  { key: "gate", label: "A｜先看會不會被刷掉", description: "量體、配置、主要動線與已確認硬條件；這層沒過，先不要忙著修小地方" },
+  { key: "core", label: "B｜通過後的核心設計", description: "題意、建築計畫、室內外、剖面與使用關係，決定能不能從 60 分往上加" },
+  { key: "polish", label: "C｜加分／有時間再修", description: "不影響基本盤的表達、細節與次要改善；考場時間不夠可以後放" },
+  { key: "good", label: "保留｜有效策略", description: "已有圖面證據的有效做法，修改其他問題時不要順手把它拆掉" }
 ];
 
 function issueGroupKey(issue: ReviewItem): IssueGroupKey {
   if (issue.kind === "strength") return "good";
-  if (issue.severity === "high") return "critical";
-  if (issue.severity === "medium" || issue.kind === "clarity_request") return "medium";
-  return "light";
+  if (issue.severity === "high") return "gate";
+  if (issue.severity === "medium" || issue.kind === "clarity_request") return "core";
+  return "polish";
 }
 
 function issuePriority(issue: ReviewItem) {
@@ -353,7 +353,7 @@ export default function Home() {
   const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, ReviewFeedbackDraft>>({});
   const [feedbackSaveStates, setFeedbackSaveStates] = useState<Record<string, FeedbackSaveState>>({});
   const [expandedIssueGroups, setExpandedIssueGroups] = useState<Record<IssueGroupKey, boolean>>({
-    critical: true, medium: false, light: false, good: false
+    gate: true, core: false, polish: false, good: false
   });
   const [persistedReview, setPersistedReview] = useState<PersistedReviewState | null>(null);
   const [persistenceNotice, setPersistenceNotice] = useState("");
@@ -802,12 +802,43 @@ export default function Home() {
     return groupOrder || issuePriority(right) - issuePriority(left) || left.title.localeCompare(right.title, "zh-Hant");
   }), [issues]);
   const groupedIssues = useMemo<Record<IssueGroupKey, ReviewItem[]>>(() => {
-    const groups: Record<IssueGroupKey, ReviewItem[]> = { critical: [], medium: [], light: [], good: [] };
+    const groups: Record<IssueGroupKey, ReviewItem[]> = { gate: [], core: [], polish: [], good: [] };
     orderedIssues.forEach((issue) => groups[issueGroupKey(issue)].push(issue));
     return groups;
   }, [orderedIssues]);
   const issueNumberById = useMemo(() => new Map(orderedIssues.map((issue, index) => [issue.id, index + 1])), [orderedIssues]);
   const displayDimensions = review?.dimensions ?? [];
+  const immediateRisks = useMemo(() => orderedIssues
+    .filter((issue) => issue.kind !== "strength")
+    .slice(0, 3), [orderedIssues]);
+  const juryGate = useMemo(() => {
+    if (!review) return null;
+    const confirmedGateIssues = groupedIssues.gate.filter((issue) => issue.kind === "issue");
+    const scoreRatio = typeof review.overallScore === "number" && typeof review.overallMaxScore === "number" &&
+      review.overallMaxScore > 0 ? review.overallScore / review.overallMaxScore : null;
+    if (confirmedGateIssues.length) return {
+      tone: "risk" as const,
+      label: "第一輪：不過關風險高",
+      detail: `先處理 ${confirmedGateIssues.length} 個可能直接影響通關的問題，再談設計加分。`
+    };
+    if (scoreRatio !== null && scoreRatio < 0.6) return {
+      tone: "risk" as const,
+      label: "第一輪：仍在通關線下",
+      detail: "沒有單一高風險卡，但整體分項仍未站穩基本盤，先修核心配置與題意回應。"
+    };
+    if (groupedIssues.core.some((issue) => issue.kind === "clarity_request")) return {
+      tone: "borderline" as const,
+      label: "第一輪：可讀，但有關鍵證據待確認",
+      detail: "目前沒有已確認的淘汰型問題；先補清楚關鍵位置，再決定是否進入加分細評。"
+    };
+    return {
+      tone: "pass" as const,
+      label: "第一輪：基本盤可進入細評",
+      detail: scoreRatio !== null && scoreRatio >= 0.6
+        ? "量體、配置與主要動線沒有已確認的致命問題，接下來看題意、剖面空間與設計品質能加多少分。"
+        : "目前沒有已確認的淘汰型問題；接下來把注意力放在核心設計，而不是先修圖面小瑕疵。"
+    };
+  }, [review, groupedIssues]);
 
   const activeIssue = useMemo<ReviewItem | undefined>(
     () => issues.find((issue) => issue.id === activeId),
@@ -816,9 +847,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!review) return;
-    const first = issueGroupDefinitions.find((group) => groupedIssues[group.key].length)?.key || "critical";
-    setExpandedIssueGroups({ critical: first === "critical", medium: first === "medium",
-      light: first === "light", good: first === "good" });
+    const first: IssueGroupKey = groupedIssues.gate.length ? "gate"
+      : groupedIssues.core.length ? "core" : groupedIssues.polish.length ? "polish" : "good";
+    setExpandedIssueGroups({ gate: first === "gate", core: first === "core",
+      polish: first === "polish", good: first === "good" });
   }, [review?.reviewId]);
 
   useEffect(() => {
@@ -2010,9 +2042,26 @@ export default function Home() {
             </div>
           </details>}
 
+          {review && juryGate && <section className={`jury-gate-summary jury-gate-${juryGate.tone}`} aria-label="60 秒評審判斷">
+            <div className="jury-gate-heading">
+              <span>60 秒評審判斷</span>
+              <strong>{juryGate.label}</strong>
+              <p>{juryGate.detail}</p>
+            </div>
+            <div className="jury-immediate-risks">
+              <span>第一眼最值得先看的 {immediateRisks.length} 項</span>
+              {immediateRisks.length ? immediateRisks.map((issue, index) =>
+                <button key={issue.id} type="button" onClick={() => focusIssueOnDrawing(issue)}>
+                  <b>{index + 1}</b><span>{issue.title}</span>
+                  <small>{issue.kind === "clarity_request" ? "待確認" :
+                    issue.severity === "high" ? "通關風險" : issue.severity === "medium" ? "核心問題" : "次要改善"}</small>
+                </button>) : <p>目前沒有需要優先處理的負面意見。</p>}
+            </div>
+          </section>}
+
           {review && <div className="review-guidance">
-            <strong>先處理最嚴重的意見</strong>
-            <span>圖框預設鎖定。按「定位調整圖框」開始移動或縮放，再按一次完成定位並啟動此區重判。</span>
+            <strong>卡片依考場決策順序排列，不是依 AI 找到問題的先後順序</strong>
+            <span>先看 A 通關層，再看 B 核心設計；C 層與優點預設收合。圖框可定位後局部重判，不必重跑整張圖。</span>
           </div>}
 
           <div className="issue-list">
