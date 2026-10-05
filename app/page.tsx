@@ -64,9 +64,9 @@ const scoringModeLabels = {
 } as const;
 
 const severityLabels: Record<ReviewSeverity, string> = {
-  high: "最嚴重",
-  medium: "中等",
-  low: "輕度",
+  high: "通關風險",
+  medium: "核心問題",
+  low: "次要改善",
   info: "待確認"
 };
 
