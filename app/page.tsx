@@ -18,14 +18,15 @@ import type { QuestionDocument } from "@/lib/question-source";
 import type { ObservationOverrides } from "@/lib/review-observation";
 import { normalizeConfirmedRegions } from "@/lib/review-grounding";
 import { isPracticeQuestion, type PracticeQuestion, type PracticeQuestionMode } from "@/lib/practice-question";
-import { renderPracticeSiteSvg } from "@/lib/practice-site";
+import type { SiteShape } from "@/lib/practice-site";
+import PracticeStudio from "./practice-studio";
 import { getReviewScenario, isReviewScenarioId, normalizeReviewMinutes, reviewScenarios,
   type ReviewScenarioId } from "@/lib/review-scenario";
 import {
   createMockReview,
   createMockSupplementReview
 } from "@/lib/review-mock";
-import { QuestionBankPanel, QuestionSelector } from "./question-bank";
+import { QuestionSelector } from "./question-bank";
 import CliProxyOAuthPanel from "./cli-proxy-oauth";
 import {
   isImageSuggestionConfigured,
@@ -334,13 +335,16 @@ export default function Home() {
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerEndAt, setTimerEndAt] = useState(0);
   const [generatedQuestion, setGeneratedQuestion] = useState<PracticeQuestion | null>(null);
-  const [generatorOpen, setGeneratorOpen] = useState(false);
+  const [activeWorkspace, setActiveWorkspace] = useState<"review" | "practice">("review");
+  const [siteShape, setSiteShape] = useState<SiteShape | "auto">("auto");
+  const [northAngle, setNorthAngle] = useState<number | "auto">("auto");
   const [questionMode, setQuestionMode] = useState<PracticeQuestionMode>("mock");
   const [questionCategory, setQuestionCategory] = useState<QuestionCategory>("architectural_design");
   const [specialRequirements, setSpecialRequirements] = useState("");
   const [questionSelectorKey, setQuestionSelectorKey] = useState(0);
   const [isGeneratingQuestion, setIsGeneratingQuestion] = useState(false);
   const [questionGenerationError, setQuestionGenerationError] = useState("");
+  const [questionGenerationNotice, setQuestionGenerationNotice] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [transferNotice, setTransferNotice] = useState("");
   const [discussions, setDiscussions] = useState<Record<string, DiscussionMessage[]>>({});
@@ -384,10 +388,6 @@ export default function Home() {
   const suppressOverlayClick = useRef(false);
   const skipCanvasFocusIssueId = useRef("");
   const pendingZoomAnchor = useRef<{ x: number; y: number } | null>(null);
-  const generatedSiteSvg = useMemo(() => generatedQuestion?.sitePlan
-    ? renderPracticeSiteSvg(generatedQuestion.sitePlan) : "", [generatedQuestion]);
-  const generatedSiteUrl = useMemo(() => generatedSiteSvg
-    ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(generatedSiteSvg)}` : "", [generatedSiteSvg]);
 
   useEffect(() => {
     if (isStaticDemo) return;
@@ -492,25 +492,57 @@ export default function Home() {
 
   const isLocalModelReady = Boolean(selectedModel && detectedModels.includes(selectedModel));
 
+  function usePracticeQuestion(question: PracticeQuestion) {
+    setGeneratedQuestion(question);
+    setSelectedQuestion(null);
+    setQuestionSelectorKey((value) => value + 1);
+    setQuestionPdf(null);
+    if (questionPdfInputRef.current) questionPdfInputRef.current.value = "";
+    setQuestionCategory(question.category);
+    setQuestionMode(question.mode);
+    setSpecialRequirements(question.specialRequirements || "");
+    if (question.durationMinutes) {
+      setTimerRunning(false);
+      handleMinutesChange(question.durationMinutes);
+      setTimerRemaining(question.durationMinutes * 60);
+    }
+  }
+
+  function togglePracticeTimer() {
+    if (timerRunning) {
+      setTimerRemaining(Math.max(0, Math.ceil((timerEndAt - Date.now()) / 1000)));
+      setTimerRunning(false);
+    } else {
+      const remaining = timerRemaining || normalizeReviewMinutes(targetMinutes, selectedScenario) * 60;
+      setTimerRemaining(remaining);
+      setTimerEndAt(Date.now() + remaining * 1000);
+      setTimerRunning(true);
+    }
+  }
+
   async function handleGenerateQuestion() {
     if (!isLocalModelReady || isGeneratingQuestion) return;
     setIsGeneratingQuestion(true);
     setQuestionGenerationError("");
+    setQuestionGenerationNotice("");
     try {
+      const recentQuestions = JSON.parse(localStorage.getItem("design_ai_practice_library_v1") || "[]")
+        .filter(isPracticeQuestion).slice(0, 8).map((question: PracticeQuestion) => ({
+          title: question.title, themeKey: question.themeKey, program: question.program,
+          shape: question.sitePlan?.shape,
+          roadSegments: question.sitePlan?.roads.map((road) => road.segmentIndex)
+        }));
       const response = await fetch("/api/questions/generate", { method: "POST",
         headers: { "Content-Type": "application/json", ...await reviewApiHeaders() },
         body: JSON.stringify({ category: questionCategory, mode: questionMode,
-          scenario: selectedScenario, minutes: targetMinutes, model: selectedModel, specialRequirements }) });
+          scenario: selectedScenario, minutes: targetMinutes, model: selectedModel, specialRequirements, siteShape, northAngle,
+          previousShape: generatedQuestion?.sitePlan?.shape, previousNorthAngle: generatedQuestion?.sitePlan?.northAngleDeg, recentQuestions }) });
       const payload = await response.json();
       if (!response.ok || !isPracticeQuestion(payload.question) || !payload.question.sitePlan) {
         throw new Error(payload?.error || "模型未回傳完整的練習題。");
       }
-      setGeneratedQuestion(payload.question);
-      setGeneratorOpen(true);
-      setSelectedQuestion(null);
-      setQuestionSelectorKey((current) => current + 1);
-      setQuestionPdf(null);
-      if (questionPdfInputRef.current) questionPdfInputRef.current.value = "";
+      usePracticeQuestion({ ...payload.question, generationModel: payload.question.generationModel || payload.model });
+      setQuestionGenerationNotice(typeof payload.notice === "string" ? payload.notice : "已完成題目與基地條件核對。");
     } catch (error) {
       setQuestionGenerationError(error instanceof Error ? error.message : "題目生成失敗。");
     } finally { setIsGeneratingQuestion(false); }
@@ -565,7 +597,6 @@ export default function Home() {
       setGeneratedQuestion(practice);
       setQuestionMode(practice?.mode || "mock");
       setSpecialRequirements(practice?.specialRequirements || "");
-      setGeneratorOpen(Boolean(practice));
       setSelectedScenario(scenario);
       setQuestionCategory(practice?.category || (scenario === "site_4h" ? "site_planning" : scenario === "civil_6h" ? "civil_service_grade_3" : "architectural_design"));
       setTargetMinutes(minutes);
@@ -778,15 +809,6 @@ export default function Home() {
     }
   }
 
-  function downloadGeneratedSite() {
-    if (!generatedSiteSvg || !generatedQuestion) return;
-    const url = URL.createObjectURL(new Blob([generatedSiteSvg], { type: "image/svg+xml;charset=utf-8" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${generatedQuestion.title.replace(/[\\/:*?"<>|]/g, "-")}-基地條件圖.svg`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
 
   useEffect(() => {
     return () => {
@@ -1539,7 +1561,6 @@ export default function Home() {
           </p>
         </div>
         <div className="topbar-actions">
-          <QuestionBankPanel />
           {!isStaticDemo && <CliProxyOAuthPanel />}
           <div className="status-pill">
             {isLocalModelReady
@@ -1555,6 +1576,32 @@ export default function Home() {
       {isStaticDemo && <p className="hosted-demo-note">這是 GitHub Pages 靜態展示頁。AI 生題、串流意見討論與帳號額度審圖需要執行
         <a href="https://github.com/QQQIIIAAANNN/DESIGN_AI_Teacher" target="_blank" rel="noopener noreferrer">本機完整版本</a>。</p>}
 
+      <nav className="studio-navigation" aria-label="工作專區">
+        <button type="button" aria-pressed={activeWorkspace === "review"} onClick={() => setActiveWorkspace("review")}>AI 審圖區</button>
+        <button type="button" aria-pressed={activeWorkspace === "practice"} onClick={() => setActiveWorkspace("practice")}>練圖專區</button>
+        {timerRunning && <span className="studio-timer-status">練圖計時中 · {formatClock(timerRemaining)}</span>}
+      </nav>
+      <div hidden={activeWorkspace !== "practice"}>
+        <PracticeStudio question={generatedQuestion} onUseQuestion={usePracticeQuestion}
+          onUsePastQuestion={(question) => {
+            setSelectedQuestion(question); setGeneratedQuestion(null); setQuestionPdf(null);
+            if (questionPdfInputRef.current) questionPdfInputRef.current.value = "";
+            setQuestionSelectorKey((value) => value + 1);
+            setQuestionCategory(question.category);
+          }}
+          selectedTitle={questionPdf?.name || selectedQuestion?.title || generatedQuestion?.title || ""}
+          mode={questionMode} onModeChange={setQuestionMode} category={questionCategory} onCategoryChange={setQuestionCategory}
+          specialRequirements={specialRequirements} onSpecialChange={setSpecialRequirements}
+          siteShape={siteShape} onShapeChange={setSiteShape} northAngle={northAngle} onNorthChange={setNorthAngle}
+          generating={isGeneratingQuestion} ready={isLocalModelReady} error={questionGenerationError} onGenerate={() => void handleGenerateQuestion()}
+          generationNotice={questionGenerationNotice}
+          selectedModel={selectedModel} models={detectedModels} onModelChange={handleModelChange} onRefreshModels={() => void refreshCliproxyStatus(true)}
+          scenario={selectedScenario} onScenarioChange={handleScenarioChange} minutes={targetMinutes} onMinutesChange={handleMinutesChange}
+          remaining={timerRemaining} running={timerRunning} onToggleTimer={togglePracticeTimer}
+          onResetTimer={() => { setTimerRunning(false); setTimerRemaining(normalizeReviewMinutes(targetMinutes, selectedScenario) * 60); }}
+          onGoReview={() => setActiveWorkspace("review")} />
+      </div>
+      <div hidden={activeWorkspace !== "review"}>
       <section className="hero-grid">
         <div className="upload-card">
           <div>
@@ -1637,21 +1684,6 @@ export default function Home() {
           </details>
 
           <div className="practice-tools">
-            <div className="practice-timer" aria-label="練習計時器">
-              <span>練習計時</span><output aria-live={timerRemaining === 0 ? "polite" : "off"}>{formatClock(timerRemaining)}</output>
-              <button type="button" onClick={() => {
-                if (timerRunning) {
-                  setTimerRemaining(Math.max(0, Math.ceil((timerEndAt - Date.now()) / 1000)));
-                  setTimerRunning(false);
-                } else {
-                  const remaining = timerRemaining || targetMinutes * 60;
-                  setTimerRemaining(remaining);
-                  setTimerEndAt(Date.now() + remaining * 1000);
-                  setTimerRunning(true);
-                }
-              }}>{timerRunning ? "暫停" : timerRemaining === 0 ? "再開始" : "開始"}</button>
-              <button type="button" onClick={() => { setTimerRunning(false); setTimerRemaining(targetMinutes * 60); }}>重設</button>
-            </div>
             <div className="bundle-actions">
               <button type="button" onClick={() => void handleExport()}>匯出工作檔</button>
               <button type="button" onClick={() => bundleInputRef.current?.click()} disabled={isImporting}>{isImporting ? "匯入中…" : "匯入工作檔"}</button>
@@ -1660,52 +1692,12 @@ export default function Home() {
           </div>
           {transferNotice && <p className="status-note" role="status">{transferNotice}</p>}
 
+          {generatedQuestion && <div className="selected-question-card"><div><span>本次使用練圖專區題目</span><strong>{generatedQuestion.title}</strong></div>
+            <button type="button" className="practice-action" onClick={() => setActiveWorkspace("practice")}>查看完整題目</button></div>}
           <QuestionSelector key={questionSelectorKey} initialQuestion={selectedQuestion} onSelect={(question) => {
             setSelectedQuestion(question);
             if (question) setGeneratedQuestion(null);
           }} />
-          <details className="practice-generator" open={generatorOpen} onToggle={(event) => setGeneratorOpen(event.currentTarget.open)}>
-            <summary>AI 生成練習題 <span>同級模擬 · 考前猜題</span></summary>
-            <div className="generator-controls">
-              <label>用途<select value={questionMode} onChange={(event) => setQuestionMode(event.target.value as PracticeQuestionMode)}>
-                <option value="mock">同級模擬題</option><option value="forecast">考前猜題練習</option>
-              </select></label>
-              <label>題型<select value={questionCategory} onChange={(event) => setQuestionCategory(event.target.value as QuestionCategory)}>
-                <option value="architectural_design">建築設計</option><option value="site_planning">敷地計畫</option>
-                <option value="civil_service_grade_3">公務三級</option>
-              </select></label>
-              <label className="generator-special">特殊練習需求
-                <textarea value={specialRequirements} maxLength={800} rows={3}
-                  onChange={(event) => setSpecialRequirements(event.target.value)}
-                  placeholder="例如：河岸基地、保留老樹，並特別練習人車分流與半戶外空間。" />
-              </label>
-              <button type="button" disabled={!isLocalModelReady || isGeneratingQuestion}
-                onClick={() => void handleGenerateQuestion()}>{isGeneratingQuestion ? "正在參考歷年案例…" : generatedQuestion ? "重新生成" : "生成題目"}</button>
-            </div>
-            <p className="generator-note">參考同類歷年案例及可讀取的官方 PDF，產生新的題目與一致的基地示意圖；猜題不代表官方預測。</p>
-            {isStaticDemo && <p className="generator-note">完整生題與基地圖下載請在本機完整版使用。</p>}
-            {questionGenerationError && <p className="error-text" role="alert">{questionGenerationError}</p>}
-            {generatedQuestion && <div className="generated-question-card">
-              <div className="generated-question-title"><div><span>{generatedQuestion.mode === "forecast" ? "考前猜題練習" : "同級模擬題"}</span>
-                <h3>{generatedQuestion.title}</h3></div>
-                <button type="button" onClick={() => setGeneratedQuestion(null)}>不使用</button></div>
-              <p>{generatedQuestion.premise}</p>
-              {generatedQuestion.specialRequirements && <p className="generated-focus">本次指定練習：{generatedQuestion.specialRequirements}</p>}
-              {generatedSiteUrl && <figure className="generated-site-figure">
-                <div className="generated-site-heading"><figcaption>基地條件圖 <span>圖上方為北 · 黑白試題風格</span></figcaption>
-                  <button type="button" onClick={downloadGeneratedSite}>下載 SVG</button></div>
-                <img src={generatedSiteUrl} alt="依題目基地尺寸、道路與鄰地條件繪製的基地圖，指北向上" />
-              </figure>}
-              {([ ["基地條件", generatedQuestion.siteConditions], ["機能需求", generatedQuestion.program],
-                ["設計課題", generatedQuestion.designTasks], ["應交圖說", generatedQuestion.drawingRequirements],
-                ["限制條件", generatedQuestion.constraints] ] as const).map(([heading, rows]) =>
-                rows.length ? <section key={heading}><strong>{heading}</strong><ul>{rows.map((row, index) => <li key={index}>{row}</li>)}</ul></section> : null)}
-              <small>參考案例：{generatedQuestion.referenceIds.map((id) => {
-                const source = questionBankCatalog.find((item) => item.id === id);
-                return source ? <a key={id} href={source.sourceUrl} target="_blank" rel="noopener noreferrer">{source.year} 年 {source.title}</a> : null;
-              })} · {generatedQuestion.sourceDepth === "pdf" ? "含官方 PDF 摘錄" : "僅依題庫索引"}</small>
-            </div>}
-          </details>
           <details className="question-upload-option">
             <summary>改用自己的題目 PDF{questionPdf ? ` · ${questionPdf.name}` : ""}</summary>
             <label className="question-brief-field">
@@ -2423,6 +2415,7 @@ export default function Home() {
       </section>
       </>}
 
+      </div>
     </main>
   );
 }

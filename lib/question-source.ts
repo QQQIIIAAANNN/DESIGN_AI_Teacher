@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdtemp, rmdir, unlink, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { questionBankCatalog } from "@/data/question-bank";
 
@@ -27,13 +28,14 @@ function popplerExecutable(command: string) {
   return found || command;
 }
 
-function runPoppler(command: string, args: string[], input: Buffer, outputLimit: number): Promise<Buffer> {
+function runPoppler(command: string, args: string[], outputLimit: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn(popplerExecutable(command), args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(popplerExecutable(command), args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     const chunks: Buffer[] = [];
     let size = 0;
     let stderr = "";
     let settled = false;
+    let forcedError: Error | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error, output?: Buffer) => {
       if (settled) return;
@@ -42,52 +44,69 @@ function runPoppler(command: string, args: string[], input: Buffer, outputLimit:
       if (error) reject(error); else resolve(output || Buffer.alloc(0));
     };
     timeoutId = setTimeout(() => {
+      forcedError = new Error(`讀取題目 PDF 逾時（${command}）。請檢查 PDF 或改用較小的檔案。`);
       child.kill();
-      finish(new Error(`讀取題目 PDF 逾時（${command}）。請檢查 PDF 或改用較小的檔案。`));
     }, 30000);
     child.on("error", (error) => finish(new Error(`找不到 PDF 讀取工具 ${command}。請設定 POPPLER_BIN_DIR，指向 Poppler 的 bin 資料夾。（${error.message}）`)));
     child.stdout.on("data", (chunk: Buffer) => {
       size += chunk.length;
       if (size > outputLimit) {
+        forcedError = new Error("題目 PDF 輸出過大，請使用較小的檔案。");
         child.kill();
-        finish(new Error("題目 PDF 輸出過大，請使用較小的檔案。"));
       } else chunks.push(chunk);
     });
     child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8").slice(0, 1000); });
-    child.on("close", (code) => code === 0
-      ? finish(undefined, Buffer.concat(chunks))
-      : finish(new Error(`${command} 無法讀取題目 PDF（${stderr.trim() || `代碼 ${code}`}）。`)));
-    child.stdin.on("error", () => {});
-    child.stdin.end(input);
+    child.on("close", (code) => forcedError
+      ? finish(forcedError)
+      : code === 0
+        ? finish(undefined, Buffer.concat(chunks))
+        : finish(new Error(`${command} 無法讀取題目 PDF（${stderr.trim() || `代碼 ${code}`}）。`)));
   });
+}
+
+async function withTemporaryPdf<T>(bytes: Buffer, read: (pdfPath: string) => Promise<T>): Promise<T> {
+  const directory = await mkdtemp(path.join(tmpdir(), "design-ai-teacher-pdf-"));
+  const pdfPath = path.join(directory, "question.pdf");
+  try {
+    await writeFile(pdfPath, bytes, { flag: "wx" });
+    return await read(pdfPath);
+  } finally {
+    // These are exact files created above; remove the PDF before its empty temp directory.
+    await unlink(pdfPath).catch(() => {});
+    await rmdir(directory).catch(() => {});
+  }
 }
 
 async function readPdf(bytes: Buffer, title: string, sourceKind: "official" | "upload", sourceUrl?: string): Promise<QuestionDocument> {
   if (bytes.length > MAX_PDF_BYTES || bytes.subarray(0, 5).toString("ascii") !== "%PDF-") {
     throw new Error("題目檔必須是 25 MB 以下的有效 PDF。");
   }
-  const textResult = await runPoppler("pdftotext", ["-layout", "-enc", "UTF-8", "-", "-"], bytes, 2 * 1024 * 1024);
-  const text = textResult.toString("utf8").replace(/\u0000/g, "").trim().slice(0, 24000);
-  let pageCount = 1;
-  try {
-    const info = (await runPoppler("pdfinfo", ["-"], bytes, 10000)).toString("utf8");
-    const count = info.match(/^Pages:\s*(\d+)/m);
-    if (count) pageCount = Math.max(1, Number(count[1]));
-  } catch { /* Continue with the first page when page count is unavailable. */ }
-  const pageImages: string[] = [];
-  for (let page = 1; page <= Math.min(pageCount, 5); page += 1) {
+  return withTemporaryPdf(bytes, async (pdfPath) => {
+    // Xpdf 4.x (often installed as pdftotext on Windows) prints its usage text when
+    // stdin is passed as the PDF argument. Use an actual PDF path for every Poppler tool.
+    const textResult = await runPoppler("pdftotext", ["-layout", "-enc", "UTF-8", pdfPath, "-"], 2 * 1024 * 1024);
+    const text = textResult.toString("utf8").replace(/\u0000/g, "").trim().slice(0, 24000);
+    let pageCount = 1;
     try {
-      const image = await runPoppler("pdftoppm", ["-f", String(page), "-l", String(page), "-singlefile", "-scale-to", "1500", "-png", "-"], bytes, 8 * 1024 * 1024);
-      if (image.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
-        pageImages.push(`data:image/png;base64,${image.toString("base64")}`);
+      const info = (await runPoppler("pdfinfo", [pdfPath], 10000)).toString("utf8");
+      const count = info.match(/^Pages:\s*(\d+)/m);
+      if (count) pageCount = Math.max(1, Number(count[1]));
+    } catch { /* Continue with the first page when page count is unavailable. */ }
+    const pageImages: string[] = [];
+    for (let page = 1; page <= Math.min(pageCount, 5); page += 1) {
+      try {
+        const image = await runPoppler("pdftoppm", ["-f", String(page), "-l", String(page), "-singlefile", "-scale-to", "1500", "-png", pdfPath], 8 * 1024 * 1024);
+        if (image.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+          pageImages.push(`data:image/png;base64,${image.toString("base64")}`);
+        }
+      } catch {
+        if (!text) throw new Error("題目 PDF 含圖面但無法轉成圖片，請確認 pdftoppm 可用。");
+        break;
       }
-    } catch {
-      if (!text) throw new Error("題目 PDF 含圖面但無法轉成圖片，請確認 pdftoppm 可用。");
-      break;
     }
-  }
-  if (!text && !pageImages.length) throw new Error("無法讀取題目 PDF 內容。");
-  return { title, sourceKind, sourceUrl, text, pageImages, pageCount };
+    if (!text && !pageImages.length) throw new Error("無法讀取題目 PDF 內容。");
+    return { title, sourceKind, sourceUrl, text, pageImages, pageCount };
+  });
 }
 
 export async function loadQuestionDocument(questionId?: string, upload?: File | null): Promise<QuestionDocument | null> {

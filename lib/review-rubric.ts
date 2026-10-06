@@ -65,6 +65,20 @@ export function resolveReviewRubric(questionContext?: QuestionContext | null, pr
       totalMaxScore: items.reduce((sum, item) => sum + (item.maxScore || 0), 0),
       sourceLabel: "題目明示的給分項目" };
   }
+  if (practiceQuestion?.scoringCriteria?.length) {
+    const items = uniqueKeys(practiceQuestion.scoringCriteria.map((item, index) => ({
+      key: `practice-${index + 1}`,
+      section: "本題練習配分（非官方）",
+      label: item.criterion,
+      criterion: item.checks.join("；"),
+      maxScore: item.points,
+      source: "practice_question" as const
+    })));
+    if (items.every((item) => item.maxScore !== null && Number.isFinite(item.maxScore) && item.maxScore > 0)) {
+      return { items, mode: "question_points", totalMaxScore: items.reduce((sum, item) => sum + (item.maxScore || 0), 0),
+        sourceLabel: "本題練習配分（非官方）" };
+    }
+  }
   const fallbackReason = questionContext?.scoringItems?.length
     ? "題目給分項、標準或配分上限未能完整抽取，已改用平台備用評分準則"
       : questionContext ? "題目 PDF 未能提供完整的動態給分項，已改用平台備用評分準則"

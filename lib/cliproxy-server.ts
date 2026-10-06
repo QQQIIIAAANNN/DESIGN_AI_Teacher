@@ -1,14 +1,18 @@
 import { spawn, type ChildProcess } from "child_process";
 import fs from "fs";
 import path from "path";
+import { compatibleClaudeModel } from "@/lib/model-selection";
 
 const defaultBaseUrl = "http://127.0.0.1:8317";
 let startingUntil = 0;
+const missingClaudeModels = new Map<string, number>();
+const missingClaudeCooldownMs = 5 * 60 * 1000;
 
 export type CliProxyModelStatus = {
   running: boolean;
   authenticated: boolean;
   models: string[];
+  unavailableModels?: string[];
   statusCode?: number;
   message: string;
 };
@@ -58,6 +62,83 @@ export function getCliProxyHeaders(): Record<string, string> {
   return apiKey ? { Authorization: "Bearer " + apiKey } : {};
 }
 
+function pruneMissingClaudeModels(now = Date.now()) {
+  for (const [model, until] of missingClaudeModels) if (until <= now) missingClaudeModels.delete(model);
+}
+
+function markClaudeModelMissing(model: string) {
+  pruneMissingClaudeModels();
+  missingClaudeModels.set(model, Date.now() + missingClaudeCooldownMs);
+}
+
+function isKnownMissingClaudeModel(model: string) {
+  pruneMissingClaudeModels();
+  return (missingClaudeModels.get(model) || 0) > Date.now();
+}
+
+async function isClaudeModelNotFound(response: Response) {
+  if (response.status !== 404 && response.status !== 503) return false;
+  const body = await response.clone().json().catch(() => null) as Record<string, unknown> | null;
+  if (!body || typeof body !== "object") return false;
+  const error = body.error && typeof body.error === "object" ? body.error as Record<string, unknown> : {};
+  const message = [body.message, body.error, error.message].filter((part): part is string => typeof part === "string").join(" ");
+  const code = String(error.code || body.code || "").toLowerCase();
+  const status = String(error.status || body.status || "").toLowerCase();
+  if (response.status === 404) {
+    return /(?:model|entity|requested entity).{0,50}(?:not found|does not exist)|(?:not found).{0,50}(?:model|entity)/i.test(message) ||
+      ["model_not_found", "unknown_model", "model_not_available"].includes(code);
+  }
+  return /auth_unavailable/i.test(message) && /"code"\s*:\s*404/i.test(message) &&
+    (/"status"\s*:\s*"not_found"/i.test(message) || /model.{0,50}(?:not found|not_found)/i.test(message));
+}
+
+function withActualModel(response: Response, model: string) {
+  const responseHeaders = new Headers(response.headers);
+  responseHeaders.set("X-CliProxy-Model", model);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers: responseHeaders });
+}
+
+function requestForModel(init: RequestInit, payload: Record<string, unknown>, model: string): RequestInit {
+  return { ...init, headers: new Headers(init.headers), body: JSON.stringify({ ...payload, model }) };
+}
+
+function isClaudeFamilyModel(model: string) {
+  return /^claude-(?:opus|sonnet|haiku)(?:-|$)/i.test(model);
+}
+
+/** Retry only a confirmed Claude missing-model error, preserving the requested provider family. */
+export async function cliProxyCompletion(baseUrl: string, init: RequestInit): Promise<Response> {
+  const endpoint = `${baseUrl.replace(/\/+$/, "")}/v1/chat/completions`;
+  if (typeof init.body !== "string") return fetch(endpoint, init);
+  let payload: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(init.body);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fetch(endpoint, init);
+    payload = parsed as Record<string, unknown>;
+  } catch { return fetch(endpoint, init); }
+  if (typeof payload.model !== "string") return fetch(endpoint, init);
+  if (!isClaudeFamilyModel(payload.model)) return fetch(endpoint, init);
+
+  if (isKnownMissingClaudeModel(payload.model)) {
+    const status = await getCliProxyModelStatus();
+    const fallback = compatibleClaudeModel(payload.model, status.models);
+    if (!fallback) throw new Error(`Claude 模型 ${payload.model} 暫時不可用，沒有同系列替代模型。`);
+    const retry = await fetch(endpoint, requestForModel(init, payload, fallback));
+    if (await isClaudeModelNotFound(retry)) markClaudeModelMissing(fallback);
+    return withActualModel(retry, fallback);
+  }
+
+  const first = await fetch(endpoint, init);
+  if (!(await isClaudeModelNotFound(first))) return first;
+  markClaudeModelMissing(payload.model);
+  const status = await getCliProxyModelStatus();
+  const fallback = compatibleClaudeModel(payload.model, status.models);
+  if (!fallback) throw new Error(`Claude 模型 ${payload.model} 不存在，沒有同系列替代模型。`);
+  const retry = await fetch(endpoint, requestForModel(init, payload, fallback));
+  if (await isClaudeModelNotFound(retry)) markClaudeModelMissing(fallback);
+  return withActualModel(retry, fallback);
+}
+
 export async function getCliProxyModelStatus(): Promise<CliProxyModelStatus> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 2500);
@@ -99,13 +180,17 @@ export async function getCliProxyModelStatus(): Promise<CliProxyModelStatus> {
         .map((model) => model && typeof model.id === "string" ? model.id.trim() : "")
         .filter(Boolean)
     ));
+    pruneMissingClaudeModels();
+    const unavailableModels = [...missingClaudeModels.keys()].filter((model) => models.includes(model));
+    const availableModels = models.filter((model) => !unavailableModels.includes(model));
     return {
       running: true,
       authenticated: true,
-      models,
+      models: availableModels,
+      unavailableModels,
       statusCode: response.status,
-      message: models.length
-        ? "已連線，發現 " + models.length + " 個可用模型。"
+      message: availableModels.length
+        ? "已連線，發現 " + availableModels.length + " 個可用模型。"
         : "CLIProxyAPI 已連線，但目前沒有可用模型。請先完成 OAuth 登入。"
     };
   } catch {

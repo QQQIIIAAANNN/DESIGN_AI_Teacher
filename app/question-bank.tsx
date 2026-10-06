@@ -168,7 +168,10 @@ export function QuestionBankPanel() {
   );
 }
 
-export default function QuestionBank({ compact = false }: { compact?: boolean }) {
+export default function QuestionBank({ compact = false, onSelect }: {
+  compact?: boolean;
+  onSelect?: (question: ProjectQuestion) => void;
+}) {
   const years = useMemo(
     () => Array.from({ length: 25 }, (_, index) => 114 - index),
     []
@@ -439,6 +442,9 @@ export default function QuestionBank({ compact = false }: { compact?: boolean })
                   ) : (
                     <span className="qb-preview-unavailable">暫無預覽</span>
                   )}
+                  {onSelect && <button type="button" className="qb-preview-link" onClick={() => onSelect(question)}>
+                    選作本次練習題
+                  </button>}
                 </li>
               ))}
             </ul>
