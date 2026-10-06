@@ -1958,6 +1958,26 @@ html, body { background: var(--canvas); color: var(--ink); font-family: -apple-s
 .review-guidance { display: grid; gap: 3px; margin: 12px 0; padding: 11px 13px; border-radius: 11px; background: #eef4ff; }
 .review-guidance strong { color: #1e4f95; font-size: 11px; }
 .review-guidance span { color: #526783; font-size: 10px; line-height: 1.55; }
+.jury-gate-summary { display: grid; gap: 12px; margin: 12px 0; padding: 14px; border: 1px solid #d6dee9; border-radius: 15px; background: #fbfcfe; }
+.jury-gate-heading { display: grid; gap: 4px; }
+.jury-gate-heading > span { color: #6b7280; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+.jury-gate-heading strong { color: var(--ink); font-size: 15px; line-height: 1.35; }
+.jury-gate-heading p { margin: 0; color: var(--secondary); font-size: 10px; line-height: 1.55; }
+.jury-gate-risk { border-color: #e7b8b2; background: #fff7f6; }
+.jury-gate-risk .jury-gate-heading strong { color: #a63b31; }
+.jury-gate-borderline { border-color: #ead3a8; background: #fffbf3; }
+.jury-gate-borderline .jury-gate-heading strong { color: #9a691e; }
+.jury-gate-pass { border-color: #c9dfd1; background: #f6fbf8; }
+.jury-gate-pass .jury-gate-heading strong { color: #2d7148; }
+.jury-immediate-risks { display: grid; gap: 7px; }
+.jury-immediate-risks > span { color: #626a75; font-size: 9px; font-weight: 750; }
+.jury-immediate-risks > p { margin: 0; color: var(--secondary); font-size: 10px; }
+.jury-immediate-risks button { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 8px 10px; border: 1px solid #dfe4eb; border-radius: 10px; background: #fff; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
+.jury-immediate-risks button:hover { border-color: #9fb7df; background: #f7faff; }
+.jury-immediate-risks button b { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #eef2f7; color: #44536a; font-size: 9px; }
+.jury-immediate-risks button span { min-width: 0; font-size: 10px; font-weight: 700; line-height: 1.45; }
+.jury-immediate-risks button small { color: #7a818c; font-size: 9px; white-space: nowrap; }
+
 .active-region-note { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 12px; padding: 12px 13px; border: 1px solid #d6e2f5; border-radius: 12px; background: #f7faff; }
 .active-region-copy { display: grid; min-width: 0; gap: 3px; }
 .active-region-copy small { margin-left: 0; color: #5d7090; font-size: 9px; }
@@ -2132,12 +2152,12 @@ html, body { background: var(--canvas); color: var(--ink); font-family: -apple-s
 .issue-severity-group > summary strong { color: var(--ink); font-size: 13px; }
 .issue-severity-group > summary small { color: var(--secondary); font-size: 10px; font-weight: 500; line-height: 1.45; }
 .issue-severity-group > summary b { flex: 0 0 auto; padding: 3px 8px; border-radius: 999px; background: #fff; color: var(--secondary); font-size: 10px; }
-.issue-severity-group.group-critical { border-color: #edc7c3; background: #fff8f7; }
-.issue-severity-group.group-critical > summary::before { background: #d14334; }
-.issue-severity-group.group-medium { border-color: #ebd8b6; background: #fffbf3; }
-.issue-severity-group.group-medium > summary::before { background: #d18b1f; }
-.issue-severity-group.group-light { border-color: #d6e3dd; background: #f7fbf9; }
-.issue-severity-group.group-light > summary::before { background: #54866d; }
+.issue-severity-group.group-gate { border-color: #edc7c3; background: #fff8f7; }
+.issue-severity-group.group-gate > summary::before { background: #d14334; }
+.issue-severity-group.group-core { border-color: #ebd8b6; background: #fffbf3; }
+.issue-severity-group.group-core > summary::before { background: #d18b1f; }
+.issue-severity-group.group-polish { border-color: #d6e3dd; background: #f7fbf9; }
+.issue-severity-group.group-polish > summary::before { background: #54866d; }
 .issue-severity-group.group-good { border-color: #cce4d4; background: #f5fbf7; }
 .issue-severity-group.group-good > summary::before { background: #2f7a4b; }
 .issue-group-cards { display: grid; gap: 10px; padding: 0 10px 10px; }

@@ -136,6 +136,50 @@ async function fileToDataUrl(file: File): Promise<string> {
   return `data:${mimeType};base64,${base64}`;
 }
 
+function cliProxyErrorDetail(raw: string) {
+  const text = raw.trim().slice(0, 1600);
+  if (!text) return "";
+  try {
+    const payload = JSON.parse(text) as Record<string, unknown>;
+    const error = payload.error;
+    if (typeof error === "string") return error.slice(0, 900);
+    if (error && typeof error === "object") {
+      const row = error as Record<string, unknown>;
+      if (typeof row.message === "string") return row.message.slice(0, 900);
+      if (typeof row.code === "string") return row.code.slice(0, 300);
+    }
+    if (typeof payload.message === "string") return payload.message.slice(0, 900);
+  } catch {
+    // Keep a short plain-text upstream error when the body is not JSON.
+  }
+  return text.replace(/\s+/g, " ").slice(0, 900);
+}
+
+function cliProxyHttpError(status: number, model: string, rawBody: string, task = "審圖") {
+  const detail = cliProxyErrorDetail(rawBody);
+  const suffix = detail ? ` 原始訊息：${detail}` : "";
+  if (status === 401 || status === 403) {
+    return new Error(`CLIProxyAPI API key 無效或未設定。${suffix}`);
+  }
+  if (status === 429) {
+    return new Error(`上游帳號達到額度或速率限制，請稍後再試或切換模型。${suffix}`);
+  }
+  if (status === 400) {
+    return new Error(`目前選取的模型「${model}」無法處理這次圖片請求，請改選支援圖片的已連線模型。${suffix}`);
+  }
+  if (status === 503 && /auth_unavailable|no auth available/i.test(detail)) {
+    return new Error(
+      `CLIProxyAPI 已啟動，但模型「${model}」目前沒有可用的上游登入憑證。常見原因是 OAuth session 失效、額度耗盡或 credential 正在 cooldown；請到管理中心檢查登入狀態，必要時重新 OAuth、切換模型或重啟 CLIProxyAPI。${suffix}`
+    );
+  }
+  if (status === 502 || status === 503 || status === 504) {
+    return new Error(
+      `CLIProxyAPI 的上游模型「${model}」暫時不可用（HTTP ${status}）。本機 proxy 有回應，因此不是 Next.js 連不到 8317；請檢查該模型的 OAuth／quota／cooldown 狀態或切換模型。${suffix}`
+    );
+  }
+  return new Error(`CLIProxyAPI ${task}失敗 (HTTP ${status})。${suffix}`);
+}
+
 async function resolveCliProxyModel(requested?: string) {
   const status = await getCliProxyModelStatus();
   if (!status.running) {
@@ -171,10 +215,8 @@ async function callCliVision(baseUrl: string, model: string, system: string, use
       signal: controller.signal
     });
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) throw new Error("CLIProxyAPI API key 無效或未設定。");
-      if (response.status === 429) throw new Error("上游帳號達到額度或速率限制，請稍後再試。");
-      if (response.status === 400) throw new Error("目前選取的模型無法處理這張圖片，請改選支援圖片的已連線模型。");
-      throw new Error(`CLIProxyAPI 審圖失敗 (HTTP ${response.status})。`);
+      const rawBody = await response.text().catch(() => "");
+      throw cliProxyHttpError(response.status, model, rawBody);
     }
     return parseJsonContent(extractText(await response.json()));
   } catch (error) {
@@ -341,13 +383,8 @@ export class CliProxyReviewProvider implements ReviewProvider {
       });
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          throw new Error("CLIProxyAPI API key 無效或未設定。請確認 config.yaml 的 api-keys 或 CLIPROXY_API_KEY。");
-        }
-        if (response.status === 429) {
-          throw new Error("上游帳號目前達到額度或速率限制，請稍後再試或切換另一個已連線模型。");
-        }
-        throw new Error(`CLIProxyAPI 局部精審失敗 (HTTP ${response.status})，請確認 OAuth 帳號與模型狀態。`);
+        const rawBody = await response.text().catch(() => "");
+        throw cliProxyHttpError(response.status, modelToUse, rawBody, "局部精審");
       }
 
       const payload = await response.json();

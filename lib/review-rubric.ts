@@ -27,11 +27,11 @@ export type ResolvedReviewRubric = {
 };
 
 const platformFallbackItems: ResolvedReviewRubricItem[] = [
-  { key: "brief", section: "平台備用準則", label: "題意與建築計畫", criterion: "題目目標、機能需求、空間數量與使用者情境均有回應，且計畫關係清楚。", maxScore: 20, source: "platform_reference" },
-  { key: "site", section: "平台備用準則", label: "基地回應與配置", criterion: "建築配置回應基地邊界、道路、鄰里、方位、地形及公共界面。", maxScore: 20, source: "platform_reference" },
-  { key: "spatial", section: "平台備用準則", label: "空間組織與公共性", criterion: "室內外層次、開放程度、空間序列與公共至私密的轉換合理。", maxScore: 25, source: "platform_reference" },
-  { key: "circulation", section: "平台備用準則", label: "入口、動線與使用", criterion: "主要入口易辨識，人行、車行、服務與無障礙動線關係清楚。", maxScore: 20, source: "platform_reference" },
-  { key: "representation", section: "平台備用準則", label: "圖面完整度與設計論證", criterion: "圖說符合題目要求，平立剖與標註可讀，設計策略有圖面證據支持。", maxScore: 15, source: "platform_reference" }
+  { key: "site", section: "平台備用準則", label: "量體、配置、基地與街廓", criterion: "第一眼可理解建築量體與基地配置；室內外、道路、人行道、鄰地與街廓關係合理，沒有明顯不可行的總體配置。", maxScore: 30, source: "platform_reference" },
+  { key: "circulation", section: "平台備用準則", label: "入口、人車與服務動線", criterion: "主要入口、步行、車道、停車／服務與無障礙主要路徑可理解，交會與轉折不造成明顯通關風險。", maxScore: 20, source: "platform_reference" },
+  { key: "brief", section: "平台備用準則", label: "題意與建築計畫", criterion: "題目核心議題、機能需求、空間數量與使用者情境均有回應，且建築計畫具可行性。", maxScore: 20, source: "platform_reference" },
+  { key: "spatial", section: "平台備用準則", label: "剖面、空間與環境品質", criterion: "室內外層次、剖面空間、公共性、空間序列與永續／氣候策略彼此整合，形成可使用且有意境的空間。", maxScore: 20, source: "platform_reference" },
+  { key: "representation", section: "平台備用準則", label: "圖面可讀性與設計論證", criterion: "圖面足以讓評審快速理解方案；可由配置、平面、剖面、透視或立面等互補表達設計，不把比例或單一圖種本身當成主要評價。", maxScore: 10, source: "platform_reference" }
 ];
 
 function uniqueKeys(items: ResolvedReviewRubricItem[]) {
@@ -141,7 +141,7 @@ export function calibrateReview(review: DrawingReview, _brief: string, observati
     ? `總分由 ${dimensions.length} 個題目配分直接加總，未從意見卡倒扣`
     : "部分給分項證據不足，暫不加總總分");
   if (rubric.mode === "platform_fallback") notes.push(fullyScored
-    ? "依平台自訂備用準則直接加總（20／20／25／20／15 分），非題目官方配分"
+    ? "依平台自訂考場式備用準則直接加總（30／20／20／20／10 分），優先反映量體配置與動線；非題目官方配分"
     : "平台備用準則有分項證據不足，暫不加總總分");
   if (rubric.mode === "question_mixed") notes.push("題目只有部分項目標明配分，為避免錯誤分母，本次不加總總分");
   if (rubric.mode === "question_criteria") notes.push("題目未明載各項上限，改顯示達成狀態，不自行平均配分");
