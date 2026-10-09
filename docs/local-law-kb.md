@@ -51,7 +51,9 @@ npm test
 
 `scripts/build-law-index.mjs` 以 Markdown 為權威重建 `knowledge/laws/laws.sqlite`。重建會清除 DB 中舊 embeddings，因此若已建立向量，請另行備份或重跑 embedding。全文檢索使用 FTS5 `unicode61`，在寫入與查詢時都切中文連續二字詞（bigram），以 OR 與 `bm25` 找候選。長短字詞並不保證語意判讀，應定期抽查結果及原文。
 
-本輪 SQLite 已提交至分支，實際大小為 **1,146,880 bytes（約 1.09 MiB）**，低於 20MB。未來若嵌入向量使檔案超過 20MB，則必須以 `.gitignore` 排除並提供重建方式。
+**SQLite 改為本機產生，不再提交或由 CI 回寫。** 舊版已提交的 1,146,880 bytes（約 1.09 MiB）檔案依不刪檔規範移到 `legacy/laws.sqlite`，僅供歷史對照，**不可當成新索引使用**；原路徑 `knowledge/laws/laws.sqlite` 已加入 `.gitignore`。舊 `law-db-commit.yml` 亦移至 `legacy/law-db-commit.yml.disabled` 停用。執行 `npm run laws:build` 建庫；`npm run dev` 會透過 `predev` 自動重建。
+
+SQLite `articles` 保留全部 **401 條**，包含 `is_deleted=1` 的原文刪除條文；但 FTS5 僅索引 **非刪除條文的本文**，不加入章節、法規名稱或條號，避免刪除條文因 BM25 長度正規化污染排名。純文字查詢預設不回傳刪除條文；使用 `includeDeleted: true` 可對刪除條號直查或列出刪除條文，`getArticle()` 一律可查到其原文。此快照識別出的刪除條文應以 `is_deleted` 欄位統計，不要自行推測歷史效力。搜尋品質評測集為 `tests/law-eval.json`（25 題）。
 
 SQLite 欄位依 PR 的 `articles` schema，`embedding`、`embedding_model` 與 `embedding_dim` 預設為 NULL。`lib/law-retrieval.ts` 提供 `searchLaws(query, { limit, lawIds })` 及 `getArticle(lawId, articleLabel)`。條號支援 `第33條`、`33條`、`第33-1條`、`第33條之一`。
 
@@ -68,7 +70,7 @@ npm run laws:embed -- --limit 20
 
 `laws:embed` 將 Float32 little-endian BLOB 存入 SQLite。若模型或端點不支援會顯示清楚的 HTTP 訊息，不會自動下載模型。`searchLaws` 先做 FTS 候選檢索；已有向量時，如果有 `queryEmbedding` 或環境變數指定的 embeddings 端點，便用 cosine 重排；無向量或未設定端點時仍使用純 FTS。**真實 embeddings 路徑尚未驗證，只有假向量單元測試。**
 
-SQLite 若因附加 embeddings 而超過 Git 管理門檻，應不要提交大檔並以 `npm run laws:build` 重建；超過 20MB 時需加入 `.gitignore`。
+**重建確定性：** Markdown → articles/FTS 的資料內容與條文順序可重現，測試會逐列比對；SQLite 檔案的 SHA-256 不承諾跨機或在原檔 DROP/CREATE 重建時相同。不同 SQLite 版本、頁面配置、freelist、FTS segment 的內部儲存及舊檔案狀態，都會改變 byte-level hash；因此不再讓 CI 提交二進位資料庫。重建會覆蓋舊向量欄位，應先備份需要保存的 embeddings。
 
 ## 後續整合界線
 
