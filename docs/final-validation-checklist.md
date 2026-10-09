@@ -19,4 +19,31 @@
 | 狀態與隱私 | 測試重新整理／重啟 Next.js，檢查回饋與改圖歷史 | 回饋本機持久化正常；**改圖歷史目前只有瀏覽器工作階段**，重整後不應假裝已保存 |
 | API 存取安全 | 確認 Next.js 僅受信任網路可存取，再測未登入 API | local-only 模式本身沒有雲端身分門禁；對外部署前必須另加安全控制 |
 
+
+## 官方法規逐條人工抽查（尚未驗證）
+
+目前 401/401 條已經由獨立程序確認與 **Openlawtw 固定快照**逐字一致，但 **沒有透過自動化驗證全國法規資料庫的現行官方原文**。請人工開啟官方「單條條文」連結，注意修正日期、現行／歷史版本、生效日期以及附件；不可僅比對搜尋引擎摘要。
+
+官方網址形式：
+\`https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=D0070115&flno=34\`。
+如網站重新導向，請於官方「所有條文」頁選擇相同條號，切勿自行推定內容。
+
+| 勾選 | 法規與條號 | 官方逐條網址 | 比對重點 |
+| --- | --- | --- | --- |
+| [ ] | 總則編第 1 條 | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=D0070114&flno=1 | 法規授權依據的完整語句 |
+| [ ] | 總則編第 3-3 條 | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=D0070114&flno=3-3 | 增訂條號及逐段內容 |
+| [ ] | 設計施工編第 34 條 | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=D0070115&flno=34 | 樓梯平台深度及尺度文字 |
+| [ ] | 設計施工編第 59 條 | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=D0070115&flno=59 | 停車空間表格：框線、數字、單位、換行 |
+| [ ] | 設計施工編第 92 條 | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=D0070115&flno=92 | 走廊寬度表格及行首縮排 |
+| [ ] | 設計施工編第 167-1 條 | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=D0070115&flno=167-1 | 無障礙通路，含「之一」條號 |
+| [ ] | 設計施工編第 89-1 條（刪除） | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=D0070115&flno=89-1 | 刪除狀態及官方版本是否仍相同 |
+| [ ] | 設計施工編第 323 條（最後一條） | https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=D0070115&flno=323 | 綠建材設計技術規範引用及結尾 |
+
+人工比對步驟：
+
+1. 開啟本地 \`knowledge/laws/D0070114/chapter-01.md\`，以及 D0070115 對應分章 Markdown；用 \`npm run laws:search -- "第34條"\` 或 \`getArticle()\` 核對 SQLite 條文。
+2. 將官方單條的**完整文字**（含項、款、數字、刪除標記）與 MD／SQLite 原文逐行比對。表格需保留項序和每個儲存格，不應只比較整段純文字的大意；官方 HTML 的排版換行若有差異，另列記錄，不得默默修改文字。
+3. 記錄抽查日期、官方頁面顯示的修正／施行日期、比對結果、官方網址和差異；任何不一致先標記為「待人工核對」，不得宣稱最新法規已驗證，也不要由 LLM 自行補法條。
+4. 八條全通過才能宣稱「指定八條抽查通過」；**不代表其餘 393 條全部已核對**。正式上線前另需建立週期性版本更新與全面比對流程。
+
 **停止條件：** 條文內容與官方版本衝突、資料缺頁、模型改動 ROI 外畫面、回傳尺寸異常或含虛構法規結論時，應停止發布相關 AI 改圖示範，保留原始輸入、輸出及失敗紀錄供排查。
