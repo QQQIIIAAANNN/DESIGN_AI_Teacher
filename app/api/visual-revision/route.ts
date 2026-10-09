@@ -3,7 +3,7 @@ import sharp from "sharp";
 import { getCliProxyBaseUrl, getCliProxyHeaders, getCliProxyModelStatus } from "@/lib/cliproxy-server";
 import { reviewAuthorizationError } from "@/lib/server-auth";
 import { validRevisionBbox, type VisualRevisionSnapshot } from "@/lib/visual-revision";
-import { prepareMaskedEdit } from "@/lib/visual-revision-server";
+import { InputError, prepareMaskedEdit } from "@/lib/visual-revision-server";
 
 export const runtime = "nodejs";
 
@@ -11,7 +11,7 @@ function getSnapshot(form: FormData): VisualRevisionSnapshot {
   let item: VisualRevisionSnapshot;
   try {
     item = JSON.parse(String(form.get("snapshot") || "")) as VisualRevisionSnapshot;
-  } catch { throw new Error("缺少有效的 ROI 確認資料。"); }
+  } catch { throw new InputError("缺少有效的 ROI 確認資料。"); }
   const b = item?.bbox;
   const brief = item?.brief;
   if (!item || typeof item.issueId !== "string" || !item.issueId || item.issueId.length > 160 ||
@@ -26,7 +26,7 @@ function getSnapshot(form: FormData): VisualRevisionSnapshot {
       !brief.modifications.every((x) => typeof x === "string") ||
       !Array.isArray(brief.preserveConstraints) ||
       !brief.preserveConstraints.every((x) => typeof x === "string")) {
-    throw new Error("ROI 尚未確認或修改資料不完整，請重新確認位置。");
+    throw new InputError("ROI 尚未確認或修改資料不完整，請重新確認位置。");
   }
   return item;
 }
@@ -126,7 +126,7 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI 改圖發生錯誤。";
-    const clientError = /缺少有效|必須是|ROI 尚未|圖片內容無法辨識|寬高|像素|長寬比與 ROI|面積無效/.test(message);
+    const clientError = error instanceof InputError;
     return NextResponse.json({
       error: error instanceof Error && error.name === "AbortError" ? "圖片編修逾時，請重試。" : message
     }, { status: clientError ? 400 : 502 });
