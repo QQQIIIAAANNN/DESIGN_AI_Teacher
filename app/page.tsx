@@ -29,17 +29,14 @@ import {
 import { QuestionSelector } from "./question-bank";
 import CliProxyOAuthPanel from "./cli-proxy-oauth";
 import {
-  isImageSuggestionConfigured,
   isLiveReviewConfigured,
   isSupabaseConfigured,
   getSavedSession,
   persistReviewSession,
-  saveSuggestionImage,
   updatePersistedReviewFinding,
   updatePersistedReviewPayload
 } from "@/lib/supabase-browser";
 import {
-  generateIssueSuggestionImage,
   cropIssueImage,
   reviewDrawingWithAi,
   reviewSupplementWithAi,
@@ -97,7 +94,6 @@ function issuePriority(issue: ReviewItem) {
 
 const isStaticDemo = process.env.NEXT_PUBLIC_STATIC_DEMO === "true";
 const liveReviewEnabled = isLiveReviewConfigured();
-const aiSuggestionEnabled = isImageSuggestionConfigured();
 const supabaseConnected = isSupabaseConfigured();
 
 async function reviewApiHeaders(): Promise<HeadersInit | undefined> {
@@ -329,7 +325,6 @@ export default function Home() {
   const [drawingZoom, setDrawingZoom] = useState(100);
   const [supplements, setSupplements] = useState<Record<string, SupplementState>>({});
   const [suggestionGraphics, setSuggestionGraphics] = useState<Record<string, SuggestionGraphicState>>({});
-  const [aiSuggestionGraphics, setAiSuggestionGraphics] = useState<Record<string, SuggestionGraphicState>>({});
   const [selectedScenario, setSelectedScenario] = useState<ReviewScenarioId>("design_8h");
   const [targetMinutes, setTargetMinutes] = useState(480);
   const [timerRemaining, setTimerRemaining] = useState(480 * 60);
@@ -377,7 +372,6 @@ export default function Home() {
   const [knowledgeStats, setKnowledgeStats] = useState<{ sourceCount: number; textChunks: number;
     imagePages: number; imageEmbeddings: number; memoryEntries?: number } | null>(null);
   const suggestionGraphicUrls = useRef<string[]>([]);
-  const aiSuggestionGraphicUrls = useRef<string[]>([]);
   const questionPdfInputRef = useRef<HTMLInputElement>(null);
   const bundleInputRef = useRef<HTMLInputElement>(null);
   const drawingViewportRef = useRef<HTMLDivElement>(null);
@@ -814,7 +808,6 @@ export default function Home() {
   useEffect(() => {
     return () => {
       suggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
-      aiSuggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
 
@@ -1035,10 +1028,7 @@ export default function Home() {
   function clearSuggestionGraphics() {
     suggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
     suggestionGraphicUrls.current = [];
-    aiSuggestionGraphicUrls.current.forEach((url) => URL.revokeObjectURL(url));
-    aiSuggestionGraphicUrls.current = [];
     setSuggestionGraphics({});
-    setAiSuggestionGraphics({});
   }
 
   async function handleGenerateSuggestion(issue: ReviewItem) {
@@ -1094,72 +1084,6 @@ export default function Home() {
       }));
     }
   }
-  async function handleGenerateAiSuggestion(issue: ReviewItem) {
-    if (!imageUrl || issue.kind !== "issue") return;
-
-    const previous = aiSuggestionGraphics[issue.id]?.url;
-    if (previous?.startsWith("blob:")) {
-      URL.revokeObjectURL(previous);
-      aiSuggestionGraphicUrls.current = aiSuggestionGraphicUrls.current.filter((url) => url !== previous);
-    }
-    setAiSuggestionGraphics((current) => ({
-      ...current,
-      [issue.id]: { status: "generating" }
-    }));
-
-    try {
-      const result = await generateIssueSuggestionImage(imageUrl, issue);
-      let url = result.blob ? URL.createObjectURL(result.blob) : result.remoteUrl;
-      if (result.blob) aiSuggestionGraphicUrls.current.push(url);
-
-      let message =
-        "由 AI 參考此問題區域與修改方向生成；請再自行核對比例、法規與設計完整性。";
-      const findingId = persistedReview?.findingIds[issue.id];
-      if (result.blob && persistedReview && findingId) {
-        try {
-          const saved = await saveSuggestionImage(
-            persistedReview.sessionId,
-            findingId,
-            result.blob,
-            (process.env.NEXT_PUBLIC_IMAGE_MODEL || "").trim()
-          );
-          if (url.startsWith("blob:")) {
-            URL.revokeObjectURL(url);
-            aiSuggestionGraphicUrls.current = aiSuggestionGraphicUrls.current.filter(
-              (candidate) => candidate !== url
-            );
-          }
-          url = saved.signedUrl;
-          message += " 已保存至 Supabase 私有儲存，僅限本人登入後預覽。";
-        } catch (error) {
-          setPersistenceNotice(
-            error instanceof Error
-              ? "建議圖已在本機產生，但私有保存失敗：" + error.message
-              : "建議圖已在本機產生，但私有保存失敗。"
-          );
-          message += " 本次先保留在瀏覽器，私有保存稍後可重試。";
-        }
-      } else if (result.blob && !persistedReview) {
-        message += " 本次審圖尚未建立雲端紀錄，因此只保留在瀏覽器。";
-      } else if (result.remoteUrl) {
-        message += " 上游回傳遠端預覽連結，未複製到平台儲存。";
-      }
-
-      setAiSuggestionGraphics((current) => ({
-        ...current,
-        [issue.id]: { status: "ready", url, message }
-      }));
-    } catch (error) {
-      setAiSuggestionGraphics((current) => ({
-        ...current,
-        [issue.id]: {
-          status: "error",
-          message: error instanceof Error ? error.message : "AI 建議圖產生失敗。"
-        }
-      }));
-    }
-  }
-
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -2086,7 +2010,6 @@ export default function Home() {
                 const index = (issueNumberById.get(issue.id) || 1) - 1;
                 const supplement = supplements[issue.id];
                 const graphic = suggestionGraphics[issue.id];
-                const aiGraphic = aiSuggestionGraphics[issue.id];
                 const linkedDimensions = displayDimensions.filter((dimension) => issue.rubricRefs?.includes(dimension.key));
 
                 return (
@@ -2278,35 +2201,6 @@ export default function Home() {
                                 onClick={(event) => event.stopPropagation()}>
                                 {graphic.remote ? "開啟圖片" : `下載 ${graphic.format === "png" ? "PNG" : "SVG"}`}
                               </a>
-                            </figcaption>
-                          </figure>
-                        )}
-                        {aiGraphic?.status === "error" && (
-                          <p className="suggestion-graphic-error" role="alert">{aiGraphic.message}</p>
-                        )}
-                        {aiGraphic?.status === "ready" && aiGraphic.url && (
-                          <figure className="suggestion-graphic-preview ai-suggestion-preview">
-                            <img src={aiGraphic.url} alt={issue.title + " 的 AI 局部改善示意圖"} />
-                            <figcaption>
-                              <span>{aiGraphic.message}</span>
-                              {aiGraphic.url.startsWith("blob:") ? (
-                                <a
-                                  href={aiGraphic.url}
-                                  download={"AI改善示意圖-" + issue.id + ".png"}
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  下載 PNG
-                                </a>
-                              ) : (
-                                <a
-                                  href={aiGraphic.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  開啟原圖
-                                </a>
-                              )}
                             </figcaption>
                           </figure>
                         )}
