@@ -47,6 +47,7 @@ import {
 } from "@/lib/ai-proxy-client";
 import { normalizeSuggestionPlan, renderSuggestionSvg } from "@/lib/suggestion-svg";
 import ReviewFeedbackPanel, { type FeedbackSaveState } from "./review-feedback";
+import VisualRevisionStudio from "./visual-revision-studio";
 
 const assessmentLabels = {
   excellent: "充分達成",
@@ -2055,6 +2056,16 @@ export default function Home() {
             <strong>卡片依考場決策順序排列，不是依 AI 找到問題的先後順序</strong>
             <span>先看 A 通關層，再看 B 核心設計；C 層與優點預設收合。圖框可定位後局部重判，不必重跑整張圖。</span>
           </div>}
+
+          {review && imageUrl && <VisualRevisionStudio
+            key={review.reviewId + ":" + imageUrl}
+            review={review}
+            imageUrl={imageUrl}
+            staticDemo={isStaticDemo}
+            enabled={!isStaticDemo && isLocalModelReady}
+            authHeaders={reviewApiHeaders}
+            onLocate={(issue) => focusIssueOnDrawing(issue)}
+          />}
 
           <div className="issue-list">
             {review ? (
