@@ -53,7 +53,7 @@ npm test
 
 **SQLite 改為本機產生，不再提交或由 CI 回寫。** 舊版已提交的 1,146,880 bytes（約 1.09 MiB）檔案依不刪檔規範移到 `legacy/laws.sqlite`，僅供歷史對照，**不可當成新索引使用**；原路徑 `knowledge/laws/laws.sqlite` 已加入 `.gitignore`。舊 `law-db-commit.yml` 亦移至 `legacy/law-db-commit.yml.disabled` 停用。執行 `npm run laws:build` 建庫；`npm run dev` 會透過 `predev` 自動重建。
 
-SQLite `articles` 保留全部 **401 條**，包含 `is_deleted=1` 的原文刪除條文；但 FTS5 僅索引 **非刪除條文的本文**，不加入章節、法規名稱或條號，避免刪除條文因 BM25 長度正規化污染排名。純文字查詢預設不回傳刪除條文；使用 `includeDeleted: true` 可對刪除條號直查或列出刪除條文，`getArticle()` 一律可查到其原文。此快照識別出的刪除條文應以 `is_deleted` 欄位統計，不要自行推測歷史效力。搜尋品質評測集為 `tests/law-eval.json`（25 題）。
+SQLite `articles` 保留全部 **401 條**，包含 `is_deleted=1` 的原文刪除條文；但 FTS5 僅索引 **非刪除條文的本文**，不加入章節、法規名稱或條號，避免刪除條文因 BM25 長度正規化污染排名。純文字查詢預設不回傳刪除條文；使用 `includeDeleted: true` 可對刪除條號直查或列出刪除條文，`getArticle()` 一律可查到其原文。本快照識別出 **49 條刪除條文**（含「（刪除）」與「（刪除）。」），不可自行推測歷史效力。搜尋品質評測集為 `tests/law-eval.json`（25 題）。
 
 SQLite 欄位依 PR 的 `articles` schema，`embedding`、`embedding_model` 與 `embedding_dim` 預設為 NULL。`lib/law-retrieval.ts` 提供 `searchLaws(query, { limit, lawIds })` 及 `getArticle(lawId, articleLabel)`。條號支援 `第33條`、`33條`、`第33-1條`、`第33條之一`。
 
