@@ -58,3 +58,16 @@ export function createRevisionBrief(issue: ReviewItem): RevisionBrief {
     learningPoints: ["比較修改前後的空間組織及主要動線。", "檢查提案是否實際解決原本的設計問題。"]
   };
 }
+
+/** Normalized crop bounds with 20% context margin, shared by browser and server. */
+export function cropBounds(box: NormalizedBBox) {
+  if (!validRevisionBbox(box)) throw new Error("無效的 ROI 範圍。");
+  const clamp = (n: number) => Math.max(0, Math.min(1, n));
+  const padx = Math.max(0.015, box.w * 0.2);
+  const pady = Math.max(0.015, box.h * 0.2);
+  const x0 = clamp(box.x - padx);
+  const y0 = clamp(box.y - pady);
+  const x1 = clamp(box.x + box.w + padx);
+  const y1 = clamp(box.y + box.h + pady);
+  return { x0, y0, w: x1 - x0, h: y1 - y0 };
+}
