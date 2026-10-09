@@ -1,22 +1,34 @@
 import sharp from "sharp";
 import type { NormalizedBBox } from "./review-schema";
-import { cropBounds } from "./visual-revision";
+import { cropBounds, validRevisionBbox } from "./visual-revision.ts";
+
+export class InputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InputError";
+  }
+}
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_PIXELS = 10_000_000;
 
 async function validatePng(file: FormDataEntryValue | null, name: string) {
   if (!(file instanceof File) || file.type !== "image/png" || file.size < 100 || file.size > MAX_BYTES) {
-    throw new Error(name + " 必須是 8 MB 以下的 PNG 圖片。");
+    throw new InputError(name + " 必須是 8 MB 以下的 PNG 圖片。");
   }
   const buffer = Buffer.from(await file.arrayBuffer());
   const info = await sharp(buffer, { limitInputPixels: MAX_PIXELS }).metadata().catch(() => {
-    throw new Error(name + " 的圖片內容無法辨識或尺寸過大。");
+    throw new InputError(name + " 的圖片內容無法辨識或尺寸過大。");
   });
-  if (info.format !== "png" || !info.width || !info.height ||
-      info.width < 64 || info.height < 64 || info.width > 4096 || info.height > 4096 ||
+  if (info.format !== "png" || !info.width || !info.height) {
+    throw new InputError(name + " 的圖片內容不是有效 PNG。");
+  }
+  if ((info.width < 64 || info.height < 64) && name === "局部裁圖") {
+    throw new InputError("選取範圍太小，請放大框選範圍。");
+  }
+  if (info.width < 64 || info.height < 64 || info.width > 4096 || info.height > 4096 ||
       info.width * info.height > MAX_PIXELS) {
-    throw new Error(name + " 必須為有效 PNG，寬高介於 64–4096px，且不得超過一千萬像素。");
+    throw new InputError(name + " 的圖片尺寸超出允許範圍（64–4096px，最多一千萬像素）。");
   }
   return { buffer, width: info.width, height: info.height };
 }
@@ -35,6 +47,7 @@ function outputSize(ratio: number) {
 
 /** Cropping still comes from the browser; the edit mask never does. */
 export async function prepareMaskedEdit(form: FormData, roi: NormalizedBBox) {
+  if (!validRevisionBbox(roi)) throw new InputError("ROI 範圍無效，請重新框選。");
   const [crop, context] = await Promise.all([
     validatePng(form.get("crop"), "局部裁圖"),
     validatePng(form.get("context"), "全圖定位")
@@ -44,7 +57,7 @@ export async function prepareMaskedEdit(form: FormData, roi: NormalizedBBox) {
   const expectedRatio = bounds.w * context.width / (bounds.h * context.height);
   const actualRatio = crop.width / crop.height;
   if (!Number.isFinite(expectedRatio) || Math.abs(Math.log(actualRatio / expectedRatio)) > 0.04) {
-    throw new Error("局部裁圖的長寬比與 ROI、全圖定位資訊不符，請重新確認位置。");
+    throw new InputError("局部裁圖的長寬比與 ROI、全圖定位資訊不符，請重新確認位置。");
   }
 
   const target = outputSize(actualRatio);
@@ -64,7 +77,7 @@ export async function prepareMaskedEdit(form: FormData, roi: NormalizedBBox) {
   const y1 = Math.min(target.height, Math.floor(top + (roi.y + roi.h - bounds.y0) / bounds.h * contentHeight));
   const editableRatio = (x1 - x0) * (y1 - y0) / (target.width * target.height);
   if (x1 <= x0 || y1 <= y0 || editableRatio < 0.005 || editableRatio >= 0.95) {
-    throw new Error("ROI 遮罩可編輯面積無效，請重新框選。");
+    throw new InputError("ROI 遮罩可編輯面積無效，請重新框選。");
   }
 
   const editedBase = await sharp(crop.buffer)
