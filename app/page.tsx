@@ -2255,27 +2255,11 @@ export default function Home() {
                               ? "重新生成局部修改圖"
                               : "生成局部修改圖"}
                         </button>
-                        {aiSuggestionEnabled && (
-                          <details className="advanced-image-action">
-                            <summary>其他產圖方式</summary>
-                            <button
-                            className="suggestion-generate-button ai-suggestion-button"
-                            type="button"
-                            disabled={aiGraphic?.status === "generating" || issue.locationUnresolved}
-                            onClick={() => void handleGenerateAiSuggestion(issue)}
-                          >
-                            {aiGraphic?.status === "generating"
-                              ? "AI 正在產生局部示意圖…"
-                              : aiGraphic?.status === "ready"
-                                ? "重新產生 AI 局部示意圖"
-                                : "AI 產生此項局部示意圖"}
-                            </button>
-                          </details>
-                        )}
+                        <p className="suggestion-graphic-note">AI 圖片改圖請使用上方「AI 設計改善示範」，先確認 ROI 與修改範圍。</p>
                         <p className="suggestion-graphic-note">
                           {(issue.locationUnresolved || !issue.locationConfirmed && (issue.locationConfidence ?? 0.5) < 0.7)
                             ? "請先定位圖框；若目前位置正確可直接在圖面下方確認。"
-                            : "按下後讀取這個局部圖。能精準定位時產生 SVG；複雜圖形會改用已連線的圖片編修模型。"}
+                            : "按下後讀取這個局部圖。能精準定位時產生 SVG；如需生成式圖片編修，請使用上方 ROI 確認流程。"}
                         </p>
                         {graphic?.status === "error" && (
                           <p className="suggestion-graphic-error" role="alert">
