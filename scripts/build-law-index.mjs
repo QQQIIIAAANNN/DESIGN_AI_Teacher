@@ -13,15 +13,17 @@ export async function buildLawIndex(dbPath = resolve("knowledge/laws/laws.sqlite
     db.exec("BEGIN IMMEDIATE");
     try {
       db.exec("DROP TABLE IF EXISTS article_fts; DROP TABLE IF EXISTS articles;");
-      db.exec("CREATE TABLE articles (id INTEGER PRIMARY KEY, law_id TEXT NOT NULL, law_name TEXT NOT NULL, chapter TEXT NOT NULL, article_label TEXT NOT NULL, text TEXT NOT NULL, source_url TEXT NOT NULL, amended_date TEXT NOT NULL, md_path TEXT NOT NULL, embedding BLOB NULL, embedding_model TEXT NULL, embedding_dim INTEGER NULL, UNIQUE(law_id, article_label))");
+      db.exec("CREATE TABLE articles (id INTEGER PRIMARY KEY, law_id TEXT NOT NULL, law_name TEXT NOT NULL, chapter TEXT NOT NULL, article_label TEXT NOT NULL, text TEXT NOT NULL, source_url TEXT NOT NULL, amended_date TEXT NOT NULL, md_path TEXT NOT NULL, embedding BLOB NULL, embedding_model TEXT NULL, embedding_dim INTEGER NULL, is_deleted INTEGER NOT NULL DEFAULT 0 CHECK(is_deleted IN (0,1)), UNIQUE(law_id, article_label))");
       db.exec("CREATE INDEX law_article_lookup ON articles(law_id, article_label)");
       db.exec("CREATE VIRTUAL TABLE article_fts USING fts5(seg, tokenize='unicode61')");
-      const insert = db.prepare("INSERT INTO articles (law_id,law_name,chapter,article_label,text,source_url,amended_date,md_path) VALUES (?,?,?,?,?,?,?,?)");
+      const insert = db.prepare("INSERT INTO articles (law_id,law_name,chapter,article_label,text,source_url,amended_date,md_path,is_deleted) VALUES (?,?,?,?,?,?,?,?,?)");
       const index = db.prepare("INSERT INTO article_fts (rowid, seg) VALUES (?,?)");
       for (const row of rows) {
+        // Deleted articles remain in articles for provenance and getArticle; never enter FTS.
+        const isDeleted = /^[（(]刪除[）)]$/.test(row.text.replace(/\s+/g, "")) ? 1 : 0;
         const result = insert.run(row.law_id, row.law_name, row.chapter,
-          row.article_label, row.text, row.source_url, row.amended_date, row.md_path);
-        index.run(result.lastInsertRowid, lawTokens([row.law_name,row.chapter,row.article_label,row.text].join(" ")).join(" "));
+          row.article_label, row.text, row.source_url, row.amended_date, row.md_path, isDeleted);
+        if (!isDeleted) index.run(result.lastInsertRowid, lawTokens(row.text).join(" "));
       }
       const actual = Number(db.prepare("SELECT count(*) AS n FROM articles").get().n);
       const expected = manifest.laws.reduce((n, law) => n + law.article_count, 0);
