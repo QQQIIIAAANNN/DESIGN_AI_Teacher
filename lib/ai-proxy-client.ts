@@ -25,7 +25,6 @@ import {
   callAiProxy,
   getSavedSession,
   isActiveMember,
-  isImageSuggestionConfigured,
   isLiveReviewConfigured
 } from "@/lib/supabase-browser";
 
