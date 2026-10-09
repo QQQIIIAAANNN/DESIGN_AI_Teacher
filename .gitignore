@@ -25,3 +25,7 @@ knowledge/private/core-memory/*
 knowledge/private/tessdata/*
 !knowledge/private/tessdata/chi_tra.traineddata
 !knowledge/private/tessdata/eng.traineddata
+
+# Generated from immutable law Markdown; database bytes vary by SQLite engine/version.
+/knowledge/laws/laws.sqlite
+/knowledge/laws/laws.sqlite-*
