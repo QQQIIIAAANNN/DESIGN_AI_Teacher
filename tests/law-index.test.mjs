@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -33,7 +33,8 @@ test("SQLite index stores verbatim MD text and metadata", async () => {
         assert.equal(row[key], rows[i][key], "MD/SQLite differ: " + key + " #" + i);
       }
     }
-    assert.equal(db.prepare("SELECT count(*) AS n FROM article_fts").get().n, 401);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM article_fts").get().n,
+      db.prepare("SELECT count(*) AS n FROM articles WHERE is_deleted=0").get().n);
   } finally { db.close(); }
 });
 
@@ -97,4 +98,77 @@ test("lawIds filter limits search to selected law only", async () => {
   assert.ok(found.length);
   assert.ok(found.every((x) => x.lawId === "D0070115"));
   assert.deepEqual(await searchLaws("樓梯", { lawIds: [], dbPath }), []);
+});
+
+
+test("deleted articles stay available by ID but never contaminate FTS ranking", async () => {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const deleted = db.prepare("SELECT * FROM articles WHERE is_deleted=1").all();
+    assert.ok(deleted.length >= 25, "Expected deleted article records to be retained");
+    assert.ok(deleted.every(row => /^[（(]刪除[）)]$/.test(row.text.replace(/\s+/g, ""))));
+    assert.equal(db.prepare("SELECT count(*) AS n FROM article_fts").get().n, 401 - deleted.length);
+    const ftsDeleted = db.prepare("SELECT count(*) AS n FROM article_fts JOIN articles a ON a.id=article_fts.rowid WHERE a.is_deleted=1").get().n;
+    assert.equal(ftsDeleted, 0);
+    const first = deleted.find(row => row.law_id === "D0070115" && row.article_label === "第 89-1 條");
+    assert.ok(first);
+    assert.equal(getArticle("D0070115", "第89-1條", dbPath)?.text, first.text);
+    assert.deepEqual(await searchLaws("第89-1條", { dbPath }), []);
+    assert.equal((await searchLaws("第89-1條", { dbPath, includeDeleted: true }))[0].articleLabel, first.article_label);
+  } finally { db.close(); }
+});
+
+test("four problem queries exclude deleted articles from the top five", async () => {
+  for (const query of ["無障礙 坡道", "日照 採光", "防火避難 樓梯", "走廊"]) {
+    const results = await searchLaws(query, { dbPath, limit: 5 });
+    assert.equal(results.length, 5, "Expected five legal article results for " + query);
+    for (const result of results) {
+      assert.ok(!/^[（(]刪除[）)]$/.test(result.text.replace(/\s+/g, "")), query + ": " + result.articleLabel);
+    }
+    if (query === "無障礙 坡道") {
+      assert.ok(results.some(row => row.chapter.includes("第 十 章 無障礙建築物")),
+        "Top 5 should include active Chapter 10 accessibility articles");
+    }
+  }
+});
+
+test("Chinese numeric main article and increment convert to exact direct lookup only", async () => {
+  for (const [phrase, label] of [
+    ["第三十三條", "第 33 條"],
+    ["第三十三條之一", "第 33-1 條"],
+    ["第三百二十三條", "第 323 條"],
+    ["第一百六十七條之一", "第 167-1 條"],
+    ["第九十二條", "第 92 條"]
+  ]) {
+    const expected = getArticle("D0070115", label, dbPath);
+    if (expected) {
+      assert.equal(getArticle("D0070115", phrase, dbPath)?.text, expected.text);
+      assert.equal((await searchLaws(phrase, { dbPath, lawIds: ["D0070115"] }))[0]?.articleLabel, label);
+    } else {
+      assert.deepEqual(await searchLaws(phrase, { dbPath }), []);
+    }
+  }
+  assert.deepEqual(await searchLaws("第三十三條之二百零一", { dbPath }), []);
+});
+
+test("25 exam-oriented searches have measured source-grounded recall@10", async () => {
+  const examples = JSON.parse(await readFile(new URL("./law-eval.json", import.meta.url), "utf8"));
+  let hitCount = 0;
+  for (const row of examples) {
+    for (const target of row.expected) {
+      assert.ok(rows.find(source => source.law_id === target.lawId && source.article_label === target.articleLabel),
+        "Evaluation target absent from verbatim Markdown: " + row.query);
+    }
+    const top = await searchLaws(row.query, { dbPath, limit: 10 });
+    const hit = row.expected.some(target => top.some(result => result.lawId === target.lawId &&
+      result.articleLabel === target.articleLabel));
+    if (hit) hitCount++;
+    else console.log("Law eval miss: " + row.query + "; top articles: " +
+      top.slice(0, 5).map(item => item.articleLabel + "/" + item.lawId).join(", "));
+  }
+  const rate = hitCount / examples.length;
+  console.log("Law retrieval recall@10: " + hitCount + "/" + examples.length +
+    " = " + (rate * 100).toFixed(1) + "%");
+  assert.ok(examples.length >= 20);
+  assert.ok(rate >= 0.8, "Recall@10 falls below 80%");
 });
