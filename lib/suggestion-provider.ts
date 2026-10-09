@@ -97,8 +97,8 @@ export async function generateSuggestion(data: FormData) {
     } catch { /* Try image editing when vector geometry is not trustworthy. */ }
     const imagePrompt = typeof raw.imagePrompt === "string" && raw.imagePrompt.trim()
       ? raw.imagePrompt.trim() : `Edit this cropped architectural plan only around this issue: ${title}. Problem: ${description}. Proposed change: ${suggestion}. Preserve orientation, all unaffected geometry and labels. Draw a restrained architectural improvement overlay.`;
-    const image = await generateEditedImage(crop, imagePrompt, model || status.models[0], status.models);
-    return { kind: "image" as const, summary, ...image };
+    // Image edits now require an explicitly confirmed ROI via /api/visual-revision.
+    throw new Error("SVG 無法可靠表達此項修改。請使用「AI 設計改善示範」確認 ROI 後再進行圖片編修。");
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw new Error("局部繪圖逾時，請縮小圖檔或改用另一個模型。");
     throw error;
