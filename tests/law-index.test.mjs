@@ -106,8 +106,8 @@ test("deleted articles stay available by ID but never contaminate FTS ranking", 
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const deleted = db.prepare("SELECT * FROM articles WHERE is_deleted=1").all();
-    assert.ok(deleted.length >= 25, "Expected deleted article records to be retained");
-    assert.ok(deleted.every(row => /^[（(]刪除[）)]$/.test(row.text.replace(/\s+/g, ""))));
+    assert.equal(deleted.length, 49, "All 49 marked deleted articles must remain in articles");
+    assert.ok(deleted.every(row => /^[（(]刪除[）)]。?$/.test(row.text.replace(/\s+/g, ""))));
     assert.equal(db.prepare("SELECT count(*) AS n FROM article_fts").get().n, 401 - deleted.length);
     const ftsDeleted = db.prepare("SELECT count(*) AS n FROM article_fts JOIN articles a ON a.id=article_fts.rowid WHERE a.is_deleted=1").get().n;
     assert.equal(ftsDeleted, 0);
@@ -124,7 +124,7 @@ test("four problem queries exclude deleted articles from the top five", async ()
     const results = await searchLaws(query, { dbPath, limit: 5 });
     assert.equal(results.length, 5, "Expected five legal article results for " + query);
     for (const result of results) {
-      assert.ok(!/^[（(]刪除[）)]$/.test(result.text.replace(/\s+/g, "")), query + ": " + result.articleLabel);
+      assert.ok(!/^[（(]刪除[）)]。?$/.test(result.text.replace(/\s+/g, "")), query + ": " + result.articleLabel);
     }
     if (query === "無障礙 坡道") {
       assert.ok(results.some(row => row.chapter.includes("第 十 章 無障礙建築物")),
