@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readLawSources } from "../scripts/law-md.mjs";
 import { buildLawIndex } from "../scripts/build-law-index.mjs";
 import { searchLaws, getArticle } from "../lib/law-retrieval.ts";
+import { lawTokens } from "../lib/law-tokenizer.ts";
 
 const { manifest, rows } = await readLawSources();
 const dir = await mkdtemp(join(tmpdir(), "architect-law-"));
@@ -111,11 +112,17 @@ test("deleted articles stay available by ID but never contaminate FTS ranking", 
     assert.equal(db.prepare("SELECT count(*) AS n FROM article_fts").get().n, 401 - deleted.length);
     const ftsDeleted = db.prepare("SELECT count(*) AS n FROM article_fts JOIN articles a ON a.id=article_fts.rowid WHERE a.is_deleted=1").get().n;
     assert.equal(ftsDeleted, 0);
+    const indexed = db.prepare("SELECT a.text, f.seg FROM article_fts AS f JOIN articles a ON a.id=f.rowid").all();
+    for (const record of indexed) {
+      assert.equal(record.seg, lawTokens(record.text).join(" "),
+        "FTS must index only active article text, never law name/chapter/label");
+    }
     const first = deleted.find(row => row.law_id === "D0070115" && row.article_label === "第 89-1 條");
     assert.ok(first);
     assert.equal(getArticle("D0070115", "第89-1條", dbPath)?.text, first.text);
     assert.deepEqual(await searchLaws("第89-1條", { dbPath }), []);
     assert.equal((await searchLaws("第89-1條", { dbPath, includeDeleted: true }))[0].articleLabel, first.article_label);
+    assert.ok((await searchLaws("刪除", { dbPath, includeDeleted: true, limit: 5 })).length > 0);
   } finally { db.close(); }
 });
 
