@@ -9,7 +9,10 @@
     "validate:knowledge": "node scripts/validate-knowledge.mjs",
     "audit:knowledge": "python scripts/audit-private-knowledge.py",
     "clean:next": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\"",
-    "test": "node --experimental-strip-types --test tests/*.test.mjs"
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "laws:build": "node --experimental-strip-types scripts/build-law-index.mjs",
+    "laws:search": "node --experimental-strip-types scripts/search-laws.mjs",
+    "laws:embed": "node --experimental-strip-types scripts/embed-laws.mjs"
   },
   "dependencies": {
     "next": "^15.5.0",
