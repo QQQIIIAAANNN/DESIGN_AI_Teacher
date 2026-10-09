@@ -15,6 +15,7 @@ export type LawResult = {
 export type LawSearchOptions = {
   limit?: number;
   lawIds?: string[];
+  includeDeleted?: boolean;
   dbPath?: string;
   /** Optional caller-provided query vector for local tests or offline retrieval. */
   queryEmbedding?: number[];
@@ -23,25 +24,50 @@ export type LawSearchOptions = {
 type Row = {
   law_id: string; article_label: string; chapter: string; text: string;
   source_url: string; amended_date: string; rank: number;
-  embedding: Uint8Array | null; embedding_dim: number | null;
+  embedding: Uint8Array | null; embedding_dim: number | null; is_deleted: number;
 };
 
 function database(path?: string) {
   return new DatabaseSync(resolve(path || process.env.LAW_DB_PATH || "knowledge/laws/laws.sqlite"), { readOnly: true });
 }
 
+const chineseDigit: Record<string, number> = {
+  "零": 0, "〇": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+  "六": 6, "七": 7, "八": 8, "九": 9
+};
+
+function numeral(value: string): number | null {
+  if (/^\d+$/.test(value)) return Number(value);
+  if (!/^[零〇一二三四五六七八九十百千]+$/.test(value)) return null;
+  let total = 0, current = 0;
+  for (const char of value) {
+    if (char === "十" || char === "百" || char === "千") {
+      const unit = char === "十" ? 10 : char === "百" ? 100 : 1000;
+      total += (current || 1) * unit;
+      current = 0;
+    } else {
+      current = chineseDigit[char];
+    }
+  }
+  return total + current;
+}
+
 function key(label: string): string | null {
-  const compact = label.replace(/[\s０-９]/g, (c) => {
-    const n = c.charCodeAt(0) - 0xff10;
-    return n >= 0 && n <= 9 ? String(n) : "";
-  });
-  const match = compact.match(/^(?:第)?(\d+)(?:-(\d+)(?:條)?|條(?:之(\d+|[一二三四五六七八九十]+))?)$/);
+  const compact = label.replace(/\s/g, "").replace(/[０-９]/g,
+    (c) => String(c.charCodeAt(0) - 0xff10));
+  const number = "[\\d零〇一二三四五六七八九十百千]+";
+  const match = compact.match(new RegExp("^(?:第)?(" + number + ")(?:-(" + number + ")條?|條(?:之(" + number + "))?)$"));
   if (!match) return null;
-  const chinese = ["一","二","三","四","五","六","七","八","九","十",
-    "十一","十二","十三","十四","十五","十六","十七","十八","十九","二十"];
+  const main = numeral(match[1]);
   const suffix = match[2] || match[3];
-  const numericSuffix = suffix && !/^\d+$/.test(suffix) ? String(chinese.indexOf(suffix) + 1) : suffix;
-  return suffix && numericSuffix !== "0" ? match[1] + "-" + numericSuffix : match[1];
+  const sub = suffix ? numeral(suffix) : null;
+  if (main === null || main < 1 || (suffix && (sub === null || sub < 1))) return null;
+  return String(main) + (suffix ? "-" + sub : "");
+}
+
+/** A malformed explicit article number must not silently fall into full-text search. */
+function looksLikeArticleNumber(query: string): boolean {
+  return /^第?[零〇一二三四五六七八九十百千\d０-９-]+(?:條|条)/.test(query.replace(/\s/g, ""));
 }
 
 function output(row: Row, score: number): LawResult {
@@ -97,15 +123,24 @@ export async function searchLaws(query: string, options: LawSearchOptions = {}):
       const rows = db.prepare("SELECT *, 0 AS rank FROM articles" +
         (lawIds.length ? " WHERE law_id IN (" + lawIds.map(() => "?").join(",") + ")" : "") +
         " ORDER BY law_id, id").all(...lawIds) as unknown as Row[];
-      return rows.filter((row) => key(row.article_label) === direct).slice(0, limit).map((row) => output(row, 1));
+      return rows.filter((row) => key(row.article_label) === direct && (!row.is_deleted || options.includeDeleted)).slice(0, limit).map((row) => output(row, 1));
     }
+    if (looksLikeArticleNumber(query)) return [];
     const tokens = lawTokens(query).slice(0, 24);
     if (!tokens.length) return [];
     const match = tokens.join(" OR ");
     const filter = lawIds.length ? " AND a.law_id IN (" + lawIds.map(() => "?").join(",") + ")" : "";
     const querySql = "SELECT a.*, bm25(article_fts) AS rank FROM article_fts JOIN articles a ON a.id=article_fts.rowid WHERE article_fts MATCH ?" +
-      filter + " ORDER BY rank ASC, a.id ASC LIMIT ?";
+      filter + " AND a.is_deleted=0 ORDER BY rank ASC, a.id ASC LIMIT ?";
     candidates = db.prepare(querySql).all(match, ...lawIds, Math.max(80, limit * 12)) as unknown as Row[];
+    // Deleted rows are deliberately absent from FTS; opt-in can list them via a
+    // literal deletion query without influencing the rankings of valid articles.
+    if (options.includeDeleted && tokens.includes("刪除")) {
+      const filterDeleted = lawIds.length ? " AND law_id IN (" + lawIds.map(() => "?").join(",") + ")" : "";
+      const deleted = db.prepare("SELECT *, 0 AS rank FROM articles WHERE is_deleted=1" + filterDeleted +
+        " ORDER BY id LIMIT ?").all(...lawIds, Math.max(0, limit - candidates.length)) as unknown as Row[];
+      candidates.push(...deleted);
+    }
   } finally { db.close(); }
   const hasVectors = candidates.some((row) => Boolean(row.embedding && row.embedding_dim));
   const queryVector = options.queryEmbedding ?? (hasVectors ? await remoteQueryVector(query) : null);
