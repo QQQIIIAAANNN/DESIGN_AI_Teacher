@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/local-law-kb]
   pull_request:
     branches: [main, fix/visual-revision-hardening]
 
