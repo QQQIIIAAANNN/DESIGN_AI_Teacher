@@ -63,16 +63,16 @@ export function useRoiDrag(options: {
     } else if (current.mode === "resize") {
       next = {
         ...current.origin,
-        w: clamp(p.x - current.origin.x, 0.02, 1 - current.origin.x),
-        h: clamp(p.y - current.origin.y, 0.02, 1 - current.origin.y)
+        w: clamp(p.x - current.origin.x, Math.min(0.012, 1 - current.origin.x), 1 - current.origin.x),
+        h: clamp(p.y - current.origin.y, Math.min(0.012, 1 - current.origin.y), 1 - current.origin.y)
       };
     } else {
-      const x = Math.min(p.x, current.startX);
-      const y = Math.min(p.y, current.startY);
+      const x = clamp(Math.min(p.x, current.startX), 0, 0.988);
+      const y = clamp(Math.min(p.y, current.startY), 0, 0.988);
       next = {
         x, y,
-        w: clamp(Math.abs(p.x - current.startX), 0.02, 1 - x),
-        h: clamp(Math.abs(p.y - current.startY), 0.02, 1 - y)
+        w: clamp(Math.abs(p.x - current.startX), 0.012, 1 - x),
+        h: clamp(Math.abs(p.y - current.startY), 0.012, 1 - y)
       };
     }
     if (moved(next, latest.current)) {
