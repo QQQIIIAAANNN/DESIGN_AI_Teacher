@@ -48,6 +48,9 @@ function outputSize(ratio: number) {
 /** Cropping still comes from the browser; the edit mask never does. */
 export async function prepareMaskedEdit(form: FormData, roi: NormalizedBBox) {
   if (!validRevisionBbox(roi)) throw new InputError("ROI 範圍無效，請重新框選。");
+  if (roi.w * roi.h >= 0.95) {
+    throw new InputError("ROI 遮罩可編輯面積無效，請縮小框選範圍。");
+  }
   const [crop, context] = await Promise.all([
     validatePng(form.get("crop"), "局部裁圖"),
     validatePng(form.get("context"), "全圖定位")
