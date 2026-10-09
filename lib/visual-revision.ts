@@ -17,7 +17,7 @@ export type VisualRevisionSnapshot = {
 };
 
 const DESIGN = /配置|空間|動線|分流|入口|廣場|戶外|中庭|景觀|植栽|綠帶|街廓|廊道|梯廳|開口|門窗|牆|鋪面|退縮|停留|採光|通風|使用關係|量體|人車/i;
-const NON_VISUAL = /比例尺|圖名|圖號|指北針|標高標註|文字註記|缺(?:少|漏)(?:立面|剖面|平面|分析圖|圖紙)|未附(?:立面|剖面)|張數不足|缺圖|試題配分|計算書/i;
+const NON_VISUAL = /比例尺|圖名|圖號|指北針|標高標註|文字註記|缺(?:少|漏)?(?:立面|剖面|平面|分析圖|圖紙)|未附(?:立面|剖面)|張數不足|缺圖|試題配分|計算書/i;
 
 export function validRevisionBbox(b: NormalizedBBox): boolean {
   return [b.x, b.y, b.w, b.h].every((n) => Number.isFinite(n)) &&
