@@ -1,3 +1,5 @@
+> **Supabase 路徑目前暫停，預設為 local-only。** 請先不要設定 `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` 或其他 Supabase 變數。審圖與出題先經本機 Next.js API 呼叫 CLIProxyAPI，回饋寫入本機檔案，法規資料存放 `knowledge/laws/` Markdown／SQLite。舊 Supabase 程式與 migrations 保留但不啟用。詳細功能清單及限制見 [local-law-kb.md](local-law-kb.md)。
+
 # Supabase + CLIProxyAPI 部署準備
 
 ## 目前狀態
