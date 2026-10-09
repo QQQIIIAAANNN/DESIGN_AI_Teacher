@@ -1,0 +1,227 @@
+[
+  {
+    "query": "樓梯及平臺寬度 梯級尺寸",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 33 條"
+      }
+    ]
+  },
+  {
+    "query": "樓梯高度每三公尺 平台深度",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 34 條"
+      }
+    ]
+  },
+  {
+    "query": "坡道坡度 防滑材料",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 39 條"
+      }
+    ]
+  },
+  {
+    "query": "居室採光面積 五分之一",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 41 條"
+      }
+    ]
+  },
+  {
+    "query": "採光用窗 有效採光範圍",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 42 條"
+      }
+    ]
+  },
+  {
+    "query": "鄰地門窗 陽臺 水平淨距離",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 45 條"
+      }
+    ]
+  },
+  {
+    "query": "設置停車空間 都市計畫",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 59 條"
+      }
+    ]
+  },
+  {
+    "query": "每輛停車位 寬二點五公尺",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 60 條"
+      }
+    ]
+  },
+  {
+    "query": "防火區劃 一千五百平方公尺",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 79 條"
+      }
+    ]
+  },
+  {
+    "query": "直通樓梯 避難層 屋外出入口",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 90 條"
+      }
+    ]
+  },
+  {
+    "query": "走廊之設置 寬度",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 92 條"
+      }
+    ]
+  },
+  {
+    "query": "直通樓梯 步行距離",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 93 條"
+      }
+    ]
+  },
+  {
+    "query": "室內安全梯 防火門",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 97 條"
+      }
+    ]
+  },
+  {
+    "query": "排煙設備 防煙壁",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 100 條"
+      }
+    ]
+  },
+  {
+    "query": "排煙口 水平距離",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 101 條"
+      }
+    ]
+  },
+  {
+    "query": "緊急用昇降機 構造",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 107 條"
+      }
+    ]
+  },
+  {
+    "query": "緊急進口 二層以上",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 108 條"
+      }
+    ]
+  },
+  {
+    "query": "無障礙通路通達 廁所",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 167-1 條"
+      }
+    ]
+  },
+  {
+    "query": "無障礙樓梯 至少一座",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 167-2 條"
+      }
+    ]
+  },
+  {
+    "query": "地下建築物 地下運輸系統 連接",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 181 條"
+      }
+    ]
+  },
+  {
+    "query": "建築基地綠化 建築基地保水",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 298 條"
+      }
+    ]
+  },
+  {
+    "query": "雨水 生活雜排水 回收再利用",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 319 條"
+      }
+    ]
+  },
+  {
+    "query": "綠建材 使用率計算",
+    "expected": [
+      {
+        "lawId": "D0070115",
+        "articleLabel": "第 323 條"
+      }
+    ]
+  },
+  {
+    "query": "防火避難性能設計 評定書",
+    "expected": [
+      {
+        "lawId": "D0070114",
+        "articleLabel": "第 3 條"
+      }
+    ]
+  },
+  {
+    "query": "私設通路 基地內通路",
+    "expected": [
+      {
+        "lawId": "D0070114",
+        "articleLabel": "第 3-2 條"
+      }
+    ]
+  }
+]
