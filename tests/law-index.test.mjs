@@ -46,7 +46,8 @@ test("rebuilding is idempotent: row content, FTS size and article order do not c
   const after = new DatabaseSync(dbPath, { readOnly: true });
   try {
     assert.deepEqual(after.prepare("SELECT law_id, article_label, text FROM articles ORDER BY id").all(), baseline);
-    assert.equal(after.prepare("SELECT count(*) AS n FROM article_fts").get().n, 401);
+    assert.equal(after.prepare("SELECT count(*) AS n FROM article_fts").get().n,
+      after.prepare("SELECT count(*) AS n FROM articles WHERE is_deleted=0").get().n);
   } finally { after.close(); }
 });
 
