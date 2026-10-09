@@ -20,7 +20,7 @@ export async function buildLawIndex(dbPath = resolve("knowledge/laws/laws.sqlite
       const index = db.prepare("INSERT INTO article_fts (rowid, seg) VALUES (?,?)");
       for (const row of rows) {
         // Deleted articles remain in articles for provenance and getArticle; never enter FTS.
-        const isDeleted = /^[（(]刪除[）)]$/.test(row.text.replace(/\s+/g, "")) ? 1 : 0;
+        const isDeleted = /^[（(]刪除[）)]。?$/.test(row.text.replace(/\s+/g, "")) ? 1 : 0;
         const result = insert.run(row.law_id, row.law_name, row.chapter,
           row.article_label, row.text, row.source_url, row.amended_date, row.md_path, isDeleted);
         if (!isDeleted) index.run(result.lastInsertRowid, lawTokens(row.text).join(" "));
