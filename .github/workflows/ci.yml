@@ -21,6 +21,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Build local law database
+        run: |
+          npm run laws:build
+          wc -c knowledge/laws/laws.sqlite
+
       - name: Unit tests
         run: npm test
 
