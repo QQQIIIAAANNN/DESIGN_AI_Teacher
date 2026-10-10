@@ -3,51 +3,6 @@ import { extractText, parseJsonContent } from "@/lib/ai-proxy-client";
 import { normalizeSuggestionPlan } from "@/lib/suggestion-svg";
 import { retrieveKnowledge, knowledgePrompt } from "@/lib/knowledge-retrieval";
 
-async function discoverImageModel(selected: string, models: string[]) {
-  try {
-    const response = await fetch(`${getCliProxyBaseUrl()}/v1/models`, { headers: getCliProxyHeaders(), cache: "no-store" });
-    if (!response.ok) return selected;
-    const payload = await response.json() as { data?: Array<Record<string, unknown>>; models?: Array<Record<string, unknown>> };
-    const rows = Array.isArray(payload.data) ? payload.data : Array.isArray(payload.models) ? payload.models : [];
-    const imageModel = rows.find((row) => {
-      const modalities = row.output_modalities || row.outputModalities;
-      const capabilities = row.capabilities && typeof row.capabilities === "object"
-        ? row.capabilities as Record<string, unknown> : {};
-      return typeof row.id === "string" && models.includes(row.id) &&
-        (capabilities.image_edit === true || capabilities.imageEdit === true ||
-          Array.isArray(modalities) && modalities.includes("image") ||
-          /(^|[-_/])image(?:gen)?(?:[-_/]|$)/i.test(row.id));
-    });
-    return typeof imageModel?.id === "string" ? imageModel.id : selected;
-  } catch { return selected; }
-}
-
-async function generateEditedImage(crop: File, prompt: string, selected: string, models: string[]) {
-  const model = await discoverImageModel(selected, models);
-  const form = new FormData();
-  form.append("model", model);
-  form.append("image", crop, crop.name || "plan-crop.png");
-  form.append("prompt", prompt.slice(0, 4000));
-  form.append("response_format", "b64_json");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120000);
-  try {
-    const response = await fetch(`${getCliProxyBaseUrl()}/v1/images/edits`, {
-      method: "POST", headers: getCliProxyHeaders(), body: form, signal: controller.signal
-    });
-    if (!response.ok) {
-      if ([400, 404, 422].includes(response.status)) throw new Error("已連線模型目前不支援局部圖片編修。請在 CLIProxyAPI 連接具圖片編修能力的模型。 ");
-      if (response.status === 429) throw new Error("圖片編修模型達到額度或速率限制。");
-      throw new Error(`圖片編修失敗（HTTP ${response.status}）。`);
-    }
-    const payload = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> };
-    const item = payload.data?.[0];
-    if (item?.b64_json && /^[a-z0-9+/=]+$/i.test(item.b64_json)) return { dataUrl: `data:image/png;base64,${item.b64_json}`, model };
-    if (item?.url && /^https:\/\//i.test(item.url)) return { remoteUrl: item.url, model };
-    throw new Error("圖片模型未回傳可預覽的圖片。");
-  } finally { clearTimeout(timeout); }
-}
-
 export async function generateSuggestion(data: FormData) {
   const crop = data.get("crop");
   if (!(crop instanceof File) || !["image/png", "image/jpeg", "image/webp"].includes(crop.type) || crop.size > 8 * 1024 * 1024) {
@@ -88,15 +43,12 @@ export async function generateSuggestion(data: FormData) {
       : response.status === 400 ? "目前選取的模型無法處理局部圖片，請改選支援圖片的已連線模型。"
       : `局部繪圖失敗（HTTP ${response.status}）。`);
     const raw = parseJsonContent(extractText(await response.json())) as Record<string, unknown>;
-    const summary = typeof raw.summary === "string" ? raw.summary.slice(0, 300) : "局部修改示意";
     try {
       const plan = normalizeSuggestionPlan(raw);
       if (plan.elements.filter((element) => element.type !== "label").length >= 2) {
         return { kind: "svg" as const, plan };
       }
-    } catch { /* Try image editing when vector geometry is not trustworthy. */ }
-    const imagePrompt = typeof raw.imagePrompt === "string" && raw.imagePrompt.trim()
-      ? raw.imagePrompt.trim() : `Edit this cropped architectural plan only around this issue: ${title}. Problem: ${description}. Proposed change: ${suggestion}. Preserve orientation, all unaffected geometry and labels. Draw a restrained architectural improvement overlay.`;
+    } catch { /* SVG draft was not reliable. */ }
     // Image edits now require an explicitly confirmed ROI via /api/visual-revision.
     throw new Error("SVG 無法可靠表達此項修改。請使用「AI 設計改善示範」確認 ROI 後再進行圖片編修。");
   } catch (error) {

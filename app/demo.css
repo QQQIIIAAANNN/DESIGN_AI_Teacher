@@ -2017,9 +2017,6 @@ html, body { background: var(--canvas); color: var(--ink); font-family: -apple-s
 .confidence-explain { color: var(--secondary); font-size: 11px; line-height: 1.6; margin: 10px 0 0; }
 .secondary-action { border: 1px solid #b9cbed; border-radius: 9px; background: #f5f9ff; color: #1f5fbf; padding: 8px 11px; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; margin: 6px 0; }
 .secondary-action:hover { background: #e8f1ff; }
-.advanced-image-action { margin-top: 8px; font-size: 11px; color: var(--secondary); }
-.advanced-image-action summary { cursor: pointer; }
-.advanced-image-action button { margin-top: 8px; }
 .overlay.is-picking { cursor: crosshair; }
 .overlay > g { transition: opacity .14s ease; }
 .overlay.has-active > g.svg-hidden { pointer-events: none; opacity: 0; }

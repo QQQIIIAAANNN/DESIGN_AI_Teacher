@@ -5,7 +5,6 @@ type ChatMessage = { role: "system" | "user" | "assistant"; content: ChatContent
 
 const DEFAULT_ALLOWED_ORIGINS = "https://qqqiiiaaannn.github.io,http://localhost:3000";
 const MAX_REQUEST_BYTES = 12 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 function allowedOrigins() {
   const value = Deno.env.get("AI_PROXY_ALLOWED_ORIGINS") || DEFAULT_ALLOWED_ORIGINS;
@@ -83,15 +82,6 @@ function validateMessages(input: unknown): ChatMessage[] | null {
   return messages;
 }
 
-function base64Bytes(value: string) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
 Deno.serve(async (request: Request) => {
   const origin = request.headers.get("origin");
   const headers = corsHeaders(origin);
@@ -151,8 +141,8 @@ Deno.serve(async (request: Request) => {
   const action = payload.action;
   const model = typeof payload.model === "string" ? payload.model.trim() : "";
   const chatModels = parseAllowlist(Deno.env.get("CLIPROXY_CHAT_MODELS"));
-  const imageModels = parseAllowlist(Deno.env.get("CLIPROXY_IMAGE_MODELS"));
-  const allowedModels = action === "chat" ? chatModels : action === "image_edit" ? imageModels : new Set<string>();
+  if (action !== "chat") return jsonResponse({ error: "Unsupported AI task." }, 400, origin);
+  const allowedModels = chatModels;
 
   if (!model || !allowedModels.has(model)) {
     return jsonResponse({ error: "The requested model is not enabled on this service." }, 400, origin);
@@ -199,39 +189,6 @@ Deno.serve(async (request: Request) => {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ model, messages, stream: false, max_tokens: 4096, temperature: 0.1 })
-    };
-  } else if (action === "image_edit") {
-    if (typeof payload.prompt !== "string" || payload.prompt.trim().length < 1 || payload.prompt.length > 4000) {
-      return jsonResponse({ error: "The image suggestion prompt is invalid." }, 400, origin);
-    }
-    if (!isRecord(payload.image) || typeof payload.image.mime_type !== "string" || typeof payload.image.base64 !== "string") {
-      return jsonResponse({ error: "A cropped reference image is required." }, 400, origin);
-    }
-    const mimeType = payload.image.mime_type;
-    const base64 = payload.image.base64;
-    if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType) || base64.length > MAX_IMAGE_BYTES * 1.4) {
-      return jsonResponse({ error: "The cropped reference image is not supported or is too large." }, 413, origin);
-    }
-    let bytes: Uint8Array;
-    try {
-      bytes = base64Bytes(base64);
-    } catch {
-      return jsonResponse({ error: "The cropped reference image is invalid." }, 400, origin);
-    }
-    if (bytes.byteLength > MAX_IMAGE_BYTES) {
-      return jsonResponse({ error: "The cropped reference image is too large." }, 413, origin);
-    }
-
-    const form = new FormData();
-    form.set("model", model);
-    form.set("prompt", payload.prompt.trim());
-    form.set("n", "1");
-    form.append("image", new Blob([bytes], { type: mimeType }), "issue-area.png");
-    upstreamUrl = proxyBase.toString().replace(/\/+$/, "") + "/v1/images/edits";
-    upstreamInit = {
-      method: "POST",
-      headers: { Authorization: "Bearer " + proxyApiKey },
-      body: form
     };
   } else {
     return jsonResponse({ error: "Unsupported AI task." }, 400, origin);

@@ -48,12 +48,7 @@ export type AiProxyPayload =
             >;
       }>;
     }
-  | {
-      action: "image_edit";
-      model: string;
-      prompt: string;
-      image: { mime_type: string; base64: string };
-    };
+;
 
 type SupabaseConfig = { url: string; publishableKey: string };
 
@@ -80,10 +75,6 @@ export function isSupabaseConfigured() {
 
 export function isLiveReviewConfigured() {
   return isSupabaseConfigured() && Boolean((process.env.NEXT_PUBLIC_REVIEW_MODEL || "").trim());
-}
-
-export function isImageSuggestionConfigured() {
-  return isSupabaseConfigured() && Boolean((process.env.NEXT_PUBLIC_IMAGE_MODEL || "").trim());
 }
 
 export function isActiveMember(user: SupabaseBrowserUser | null | undefined) {
@@ -427,12 +418,6 @@ export type PersistedReview = {
   findingIds: Record<string, string>;
 };
 
-export type SavedSuggestionImage = {
-  id: string;
-  storagePath: string;
-  signedUrl: string;
-};
-
 async function requireActiveSession() {
   const session = await getSavedSession();
   if (!session || !isActiveMember(session.user)) {
@@ -558,78 +543,4 @@ export async function updatePersistedReviewPayload(
       })
     }
   );
-}
-
-export async function saveSuggestionImage(
-  reviewId: string,
-  findingId: string,
-  image: Blob,
-  modelSlug: string
-): Promise<SavedSuggestionImage> {
-  if (image.size > 20 * 1024 * 1024) {
-    throw new Error("AI 建議圖超過私有儲存的大小限制。");
-  }
-  const session = await requireActiveSession();
-  const id = crypto.randomUUID();
-  const storagePath =
-    session.user.id + "/" + reviewId + "/" + findingId + "/" + id + ".png";
-  const encodedPath = storagePath.split("/").map(encodeURIComponent).join("/");
-  const uploadResponse = await authorizedFetch(
-    session,
-    "storage/v1/object/suggestion-images/" + encodedPath,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "image/png",
-        "x-upsert": "false",
-        "cache-control": "3600"
-      },
-      body: image
-    }
-  );
-  if (!uploadResponse.ok) throw new Error(await responseError(uploadResponse));
-
-  const rows = await authorizedJson<Array<{ id: string }>>(
-    session,
-    "rest/v1/suggestion_images?select=id",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Prefer: "return=representation"
-      },
-      body: JSON.stringify({
-        review_id: reviewId,
-        finding_id: findingId,
-        storage_path: storagePath,
-        model_slug: modelSlug.trim().slice(0, 200) || "unknown"
-      })
-    }
-  );
-  const imageId = rows[0]?.id;
-  if (!imageId) throw new Error("建議圖已上傳，但索引沒有成功建立。");
-
-  const signed = await authorizedJson<{ signedURL?: string }>(
-    session,
-    "storage/v1/object/sign/suggestion-images/" + encodedPath,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expiresIn: 3600 })
-    }
-  );
-  if (!signed.signedURL) throw new Error("無法建立建議圖的私有預覽連結。");
-
-  const config = getSupabaseConfig();
-  if (!config) throw new Error("尚未設定 Supabase 專案。");
-  const signedUrl = /^https?:\/\//i.test(signed.signedURL)
-    ? signed.signedURL
-    : config.url + (
-        signed.signedURL.startsWith("/storage/v1/")
-          ? signed.signedURL
-          : "/storage/v1" + (
-              signed.signedURL.startsWith("/") ? signed.signedURL : "/" + signed.signedURL
-            )
-      );
-  return { id: imageId, storagePath, signedUrl };
 }
