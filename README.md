@@ -1,3 +1,5 @@
+> **目前預設為 local-only。Supabase 路徑暫停，未設定 `NEXT_PUBLIC_SUPABASE_*` 時，審圖、局部精審、重評、設計改圖、出題與回饋使用本機 Next.js API + CLIProxyAPI／本地檔案；GitHub Pages 靜態展示不能執行 Next API。法規知識庫為 `knowledge/laws/` Markdown + SQLite，尚未接入審圖 prompt。詳見 [本機法規庫](docs/local-law-kb.md) 與 [最終驗收清單](docs/final-validation-checklist.md)。**
+
 # DESIGN_AI_Teacher
 
 建築設計與敷地考試的 AI 練習平台。它會先讀取題目和圖面，再用設計要點與基地證據提出審查意見，並把每項意見定位到作答圖上。

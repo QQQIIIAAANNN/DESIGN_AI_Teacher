@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/local-law-kb]
   pull_request:
-    branches: [main]
+    branches: [main, fix/visual-revision-hardening]
 
 jobs:
   build:
@@ -20,6 +20,11 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Build local law database
+        run: |
+          npm run laws:build
+          wc -c knowledge/laws/laws.sqlite
 
       - name: Unit tests
         run: npm test

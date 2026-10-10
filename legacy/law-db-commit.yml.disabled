@@ -1,0 +1,42 @@
+name: Build pinned law SQLite artifact
+
+on:
+  push:
+    branches: [feat/local-law-kb]
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    if: github.repository == 'QQQIIIAAANNN/DESIGN_AI_Teacher'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/local-law-kb
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Rebuild deterministic SQLite from Markdown
+        run: |
+          node --experimental-strip-types scripts/build-law-index.mjs --db "$RUNNER_TEMP/laws.sqlite"
+          bytes=$(wc -c < "$RUNNER_TEMP/laws.sqlite")
+          echo "SQLite size: $bytes bytes"
+          if [ "$bytes" -ge 20971520 ]; then
+            echo "Database >= 20MB, do not commit; document local rebuild instead."
+            exit 1
+          fi
+          cp "$RUNNER_TEMP/laws.sqlite" knowledge/laws/laws.sqlite
+      - name: Commit law database on feature branch only
+        run: |
+          git add -f knowledge/laws/laws.sqlite
+          if git diff --cached --quiet; then
+            echo "SQLite artifact already matches Markdown."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "data(laws): commit regenerated SQLite FTS5 snapshot"
+          git push origin HEAD:feat/local-law-kb
