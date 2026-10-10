@@ -27,6 +27,7 @@ if not defined CLIPROXY_BIN set "CLIPROXY_BIN=cli-proxy-api.exe"
 
 if /I "%~1"=="codex-login" goto codex_login
 if /I "%~1"=="antigravity-login" goto antigravity_login
+if /I "%~1"=="claude-login" goto claude_login
 if /I "%~1"=="management" goto management
 
 echo [AI審圖老師] 檢查本機前端是否已啟動...
@@ -68,6 +69,13 @@ call :require_proxy
 if errorlevel 1 exit /b 1
 echo [CLIProxyAPI] 開始 Antigravity OAuth；完成後請關閉此視窗或按 Ctrl+C。
 "%CLIPROXY_BIN%" --antigravity-login
+exit /b %errorlevel%
+
+:claude_login
+call :require_proxy
+if errorlevel 1 exit /b 1
+echo [CLIProxyAPI] 開始 Claude OAuth；完成後請關閉此視窗或按 Ctrl+C。
+"%CLIPROXY_BIN%" --claude-login
 exit /b %errorlevel%
 
 :management
