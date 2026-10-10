@@ -29,3 +29,6 @@ knowledge/private/tessdata/*
 # Generated from immutable law Markdown; database bytes vary by SQLite engine/version.
 /knowledge/laws/laws.sqlite
 /knowledge/laws/laws.sqlite-*
+
+# Next.js / TypeScript incremental build output
+/tsconfig.tsbuildinfo
