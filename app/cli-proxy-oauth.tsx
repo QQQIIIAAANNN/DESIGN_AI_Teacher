@@ -12,6 +12,20 @@ async function controlHeaders() {
 const defaultManagementUrl =
   (process.env.NEXT_PUBLIC_CLIPROXY_MANAGEMENT_URL || "http://127.0.0.1:8317").trim();
 
+type OAuthProviderId = "codex" | "antigravity" | "claude";
+
+const OAUTH_PROVIDERS: { id: OAuthProviderId; title: string; label: string; description: string; warning?: string }[] = [
+  { id: "codex", title: "Codex OAuth", label: "Codex (ChatGPT Plus/Pro)", description: "使用 ChatGPT Plus / Team / Pro 帳號額度" },
+  { id: "antigravity", title: "Antigravity OAuth", label: "Antigravity", description: "使用 Google Antigravity / Gemini 帳號額度" },
+  {
+    id: "claude",
+    title: "Claude OAuth",
+    label: "Claude",
+    description: "使用 Claude Pro / Max 訂閱帳號額度",
+    warning: "Anthropic 條款限制訂閱 OAuth 僅供 Claude Code 與 claude.ai；用於第三方工具可能違規並導致帳號受限，請自行評估風險。"
+  }
+];
+
 function normalizedBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
 }
@@ -120,10 +134,10 @@ export default function CliProxyOAuthPanel() {
     }
   }
 
-  async function handleLaunchOAuth(provider: "codex" | "antigravity") {
+  async function handleLaunchOAuth(provider: OAuthProviderId) {
     setLoadingProvider(provider);
     setIsError(false);
-    const providerLabel = provider === "codex" ? "Codex (ChatGPT Plus/Pro)" : "Antigravity";
+    const providerLabel = OAUTH_PROVIDERS.find((item) => item.id === provider)?.label ?? provider;
     setMessage(`正在為您開啟 ${providerLabel} OAuth 登入視窗...`);
 
     try {
@@ -202,7 +216,7 @@ export default function CliProxyOAuthPanel() {
           </div>
 
           <p className="cliproxy-settings-copy">
-            直接點擊下方登入按鈕即可開啟官方 OAuth 授權視窗，登入後審圖即可直接扣抵您的 ChatGPT Plus/Team 或 Antigravity 帳號額度。
+            直接點擊下方登入按鈕即可開啟官方 OAuth 授權視窗，登入後審圖即可直接扣抵您的 ChatGPT Plus/Team、Antigravity 或 Claude 帳號額度。
           </p>
 
           {/* 連線狀態檢測卡片 */}
@@ -283,63 +297,41 @@ export default function CliProxyOAuthPanel() {
 
           {/* 一鍵開啟 OAuth 登入視窗區塊 */}
           <div className="cliproxy-command-list">
-            {/* Codex OAuth */}
-            <div className="cliproxy-command-item">
-              <div>
-                <strong>Codex OAuth</strong>
-                <span style={{ fontSize: "10px", color: "#666" }}>
-                  使用 ChatGPT Plus / Team / Pro 帳號額度
-                </span>
-                <code>cli-proxy-api --codex-login</code>
-              </div>
-              <div className="cliproxy-btn-group">
-                <button
-                  type="button"
-                  className="cliproxy-primary-button"
-                  onClick={() => void handleLaunchOAuth("codex")}
-                  disabled={loadingProvider === "codex"}
-                >
-                  {loadingProvider === "codex" ? "開啟中..." : "🔑 開啟登入視窗"}
-                </button>
-                <button
-                  type="button"
-                  className="cliproxy-command-button"
-                  onClick={() => void copyCommand("cli-proxy-api --codex-login", "Codex")}
-                  title="複製指令手動執行"
-                >
-                  複製指令
-                </button>
-              </div>
-            </div>
-
-            {/* Antigravity OAuth */}
-            <div className="cliproxy-command-item">
-              <div>
-                <strong>Antigravity OAuth</strong>
-                <span style={{ fontSize: "10px", color: "#666" }}>
-                  使用 Google Antigravity / Gemini 帳號額度
-                </span>
-                <code>cli-proxy-api --antigravity-login</code>
-              </div>
-              <div className="cliproxy-btn-group">
-                <button
-                  type="button"
-                  className="cliproxy-primary-button"
-                  onClick={() => void handleLaunchOAuth("antigravity")}
-                  disabled={loadingProvider === "antigravity"}
-                >
-                  {loadingProvider === "antigravity" ? "開啟中..." : "🔑 開啟登入視窗"}
-                </button>
-                <button
-                  type="button"
-                  className="cliproxy-command-button"
-                  onClick={() => void copyCommand("cli-proxy-api --antigravity-login", "Antigravity")}
-                  title="複製指令手動執行"
-                >
-                  複製指令
-                </button>
-              </div>
-            </div>
+            {OAUTH_PROVIDERS.map((item) => {
+              const command = `cli-proxy-api --${item.id}-login`;
+              return (
+                <div className="cliproxy-command-item" key={item.id}>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <span style={{ fontSize: "10px", color: "#666" }}>{item.description}</span>
+                    <code>{command}</code>
+                    {item.warning && (
+                      <span style={{ fontSize: "10px", color: "#a33" }} role="note">
+                        ⚠ {item.warning}
+                      </span>
+                    )}
+                  </div>
+                  <div className="cliproxy-btn-group">
+                    <button
+                      type="button"
+                      className="cliproxy-primary-button"
+                      onClick={() => void handleLaunchOAuth(item.id)}
+                      disabled={loadingProvider === item.id}
+                    >
+                      {loadingProvider === item.id ? "開啟中..." : "🔑 開啟登入視窗"}
+                    </button>
+                    <button
+                      type="button"
+                      className="cliproxy-command-button"
+                      onClick={() => void copyCommand(command, item.label)}
+                      title="複製指令手動執行"
+                    >
+                      複製指令
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {/* Web 管理中心快速入口 */}
