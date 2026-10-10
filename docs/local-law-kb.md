@@ -45,7 +45,7 @@ npm ci
 npm run laws:build
 npm run laws:search -- "樓梯寬度"
 npm run laws:search -- "走廊"
-npm run laws:search -- "第33-1條"
+npm run laws:search -- "第167-1條"
 npm test
 ```
 
@@ -55,7 +55,7 @@ npm test
 
 SQLite `articles` 保留全部 **401 條**，包含 `is_deleted=1` 的原文刪除條文；但 FTS5 僅索引 **非刪除條文的本文**，不加入章節、法規名稱或條號，避免刪除條文因 BM25 長度正規化污染排名。純文字查詢預設不回傳刪除條文；使用 `includeDeleted: true` 可對刪除條號直查或列出刪除條文，`getArticle()` 一律可查到其原文。本快照識別出 **49 條刪除條文**（含「（刪除）」與「（刪除）。」），不可自行推測歷史效力。搜尋品質評測集為 `tests/law-eval.json`（25 題）。
 
-SQLite 欄位依 PR 的 `articles` schema，`embedding`、`embedding_model` 與 `embedding_dim` 預設為 NULL。`lib/law-retrieval.ts` 提供 `searchLaws(query, { limit, lawIds })` 及 `getArticle(lawId, articleLabel)`。條號支援 `第33條`、`33條`、`第33-1條`、`第33條之一`。
+SQLite 欄位依 PR 的 `articles` schema，`embedding`、`embedding_model` 與 `embedding_dim` 預設為 NULL。`lib/law-retrieval.ts` 提供 `searchLaws(query, { limit, lawIds })` 及 `getArticle(lawId, articleLabel)`。條號支援 `第33條`、`33條`、`第167-1條`、`第167條之一`。
 
 ## Embeddings（選配，未驗證）
 
