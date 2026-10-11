@@ -1,0 +1,2 @@
+# 法規 Markdown 的 SHA-256 以 LF 計算，禁止檢出時轉成 CRLF。
+knowledge/laws/** text eol=lf

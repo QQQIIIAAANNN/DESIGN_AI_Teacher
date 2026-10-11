@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -179,4 +179,20 @@ test("25 exam-oriented searches have measured source-grounded recall@10", async 
     " = " + (rate * 100).toFixed(1) + "%");
   assert.ok(examples.length >= 20);
   assert.ok(rate >= 0.8, "Recall@10 falls below 80%");
+});
+
+test("law sources still verify when checked out with CRLF line endings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "law-crlf-"));
+  await cp(new URL("../knowledge/laws", import.meta.url), join(root, "knowledge", "laws"), { recursive: true });
+  const manifest = JSON.parse(await readFile(join(root, "knowledge", "laws", "MANIFEST.json"), "utf8"));
+  for (const law of manifest.laws) {
+    for (const file of law.files) {
+      const path = join(root, file.path);
+      const lf = await readFile(path, "utf8");
+      await writeFile(path, lf.replace(/\n/g, "\r\n"), "utf8");
+    }
+  }
+  const original = await readLawSources();
+  const converted = await readLawSources(root);
+  assert.deepEqual(converted.rows.map((r) => r.text), original.rows.map((r) => r.text));
 });
