@@ -18,7 +18,7 @@ if not defined CLIPROXY_BIN (
   if not errorlevel 1 set "CLIPROXY_BIN=cli-proxy-api.exe"
 )
 if not defined CLIPROXY_BIN (
-  echo [錯誤] 找不到 CLIProxyAPI。請放在專案資料夾、PATH，或設定 CLIPROXY_BIN。
+  echo [ERROR] CLIProxyAPI not found. Put cli-proxy-api.exe in the project folder or PATH, or set CLIPROXY_BIN.
   pause
   exit /b 1
 )
