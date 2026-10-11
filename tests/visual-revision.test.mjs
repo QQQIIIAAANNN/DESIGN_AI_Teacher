@@ -81,7 +81,7 @@ test("cropBounds adds context and clamps to image edges", () => {
 test("high severity wins even if medium contains prominent design keywords", () => {
   const ranked = rankVisualRevisionIssues([
     issue({ id: "medium-keywords", title: "空間配置入口廣場動線失衡", severity: "medium", scoreImpact: -40 }),
-    issue({ id: "high-no-keywords", title: "道路寬度與基地條件不一致", category: "基地查核", severity: "high", scoreImpact: -1 })
+    issue({ id: "high-no-keywords", title: "重大缺陷需修正", category: "其他問題", description: "嚴重衝突", suggestion: "修正主要衝突", severity: "high", scoreImpact: -1 })
   ]);
   assert.deepEqual(ranked.map((item) => item.id), ["high-no-keywords", "medium-keywords"]);
   assert.match(revisionSelectionReason(ranked[0]), /通關風險/);
