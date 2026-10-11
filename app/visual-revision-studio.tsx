@@ -190,11 +190,11 @@ export default function VisualRevisionStudio({ review, imageUrl, enabled, static
       </details>
     </div>
     <div className="vr-actions">
-      <button type="button" onClick={() => onLocate(issue)} disabled={frozen}>在審圖大圖定位</button>
-      <button type="button" onClick={confirm} disabled={frozen || !validRevisionBbox(roi)}>
+      <button type="button" className="practice-action" onClick={() => onLocate(issue)} disabled={frozen}>在審圖大圖定位</button>
+      <button type="button" className="practice-action" onClick={confirm} disabled={frozen || !validRevisionBbox(roi)}>
         {confirmedCurrent ? "✓ 已確認修改位置" : "確認修改位置"}
       </button>
-      <button type="button" className="vr-primary" onClick={() => void generate()}
+      <button type="button" className="focus-drawing-action" onClick={() => void generate()}
         disabled={!confirmedCurrent || !enabled || frozen}>
         {frozen ? "AI 正在生成示範…" : "生成 AI 改圖示範"}
       </button>
