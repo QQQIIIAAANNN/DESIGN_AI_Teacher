@@ -1,2 +1,5 @@
 # 法規 Markdown 的 SHA-256 以 LF 計算，禁止檢出時轉成 CRLF。
 knowledge/laws/** text eol=lf
+
+# cmd.exe 對 LF 結尾的批次檔解析不穩定，一律以 CRLF 檢出。
+*.bat text eol=crlf
