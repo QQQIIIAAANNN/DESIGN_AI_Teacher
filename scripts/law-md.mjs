@@ -58,7 +58,8 @@ export async function readLawSources(root = process.cwd()) {
     let count = 0;
     const seen = new Set();
     for (const file of law.files) {
-      const content = await readFile(resolve(root, file.path), "utf8");
+      // Windows 的 git autocrlf 會把 LF 轉成 CRLF；MANIFEST 雜湊以 LF 計算，故先正規化行尾。
+      const content = (await readFile(resolve(root, file.path), "utf8")).replace(/\r\n/g, "\n");
       const actualHash = createHash("sha256").update(content, "utf8").digest("hex");
       if (actualHash !== file.sha256) throw new Error("Law SHA-256 mismatch: " + file.path);
       const { meta, articles } = parseLawMarkdown(content);
