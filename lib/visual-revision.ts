@@ -16,8 +16,9 @@ export type VisualRevisionSnapshot = {
   brief: RevisionBrief;
 };
 
-const DESIGN = /配置|空間|動線|分流|入口|廣場|戶外|中庭|景觀|植栽|綠帶|街廓|廊道|梯廳|開口|門窗|牆|鋪面|退縮|停留|採光|通風|使用關係|量體|人車/i;
-const NON_VISUAL = /比例尺|圖名|圖號|指北針|標高標註|文字註記|缺(?:少|漏)?(?:立面|剖面|平面|分析圖|圖紙)|未附(?:立面|剖面)|張數不足|缺圖|試題配分|計算書/i;
+const DESIGN = /配置|空間|動線|分流|入口|廣場|戶外|中庭|景觀|植栽|綠帶|街廓|廊道|梯廳|開口|門窗|牆|鋪面|退縮|停留|採光|通風|使用關係|量體|人車|基地|道路|題意|停車|建築線|防火|避難/i;
+const NON_VISUAL = /比例尺|圖名|圖號|指北針|標高標註|缺(?:少|漏)?(?:立面|剖面|平面|分析圖|圖紙)|未附(?:立面|剖面)|張數不足|缺圖|試題配分|計算書/i;
+const PRESENTATION_ONLY = /註記|標註|辨讀|字跡|線條|圖面清晰度|版面|圖面不清|圖面品質/i;
 
 export function validRevisionBbox(b: NormalizedBBox): boolean {
   return [b.x, b.y, b.w, b.h].every((n) => Number.isFinite(n)) &&
@@ -25,23 +26,41 @@ export function validRevisionBbox(b: NormalizedBBox): boolean {
     b.x + b.w <= 1.00001 && b.y + b.h <= 1.00001;
 }
 
+function confidence(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+}
+
+function impact(value: number | null): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.abs(value) : 0;
+}
+
+/** Severity is the primary key, never a small additive preference behind design keywords. */
 export function rankVisualRevisionIssues(items: ReviewItem[]): ReviewItem[] {
   return items.filter((item) => {
     const text = [item.title, item.category, item.description, item.suggestion].join(" ");
-    return item.kind === "issue" && item.visibilityStatus !== "illegible" &&
+    const shortText = [item.title, item.category].join(" ");
+    return item.kind === "issue" && (item.severity === "high" || item.severity === "medium") &&
+      item.visibilityStatus !== "illegible" && !item.locationUnresolved &&
       Boolean(item.suggestion.trim()) && DESIGN.test(text) &&
-      !NON_VISUAL.test([item.title, item.category].join(" ")) &&
+      !NON_VISUAL.test(shortText) && !PRESENTATION_ONLY.test(shortText) &&
       validRevisionBbox(item.bbox);
-  }).sort((a, b) => priority(b) - priority(a)).slice(0, 3);
+  }).sort((a, b) =>
+    Number(b.severity === "high") - Number(a.severity === "high") ||
+    impact(b.scoreImpact) - impact(a.scoreImpact) ||
+    confidence(b.evidenceConfidence ?? b.confidence) - confidence(a.evidenceConfidence ?? a.confidence) ||
+    confidence(b.locationConfidence) - confidence(a.locationConfidence) ||
+    a.id.localeCompare(b.id)
+  ).slice(0, 3);
 }
 
-function priority(item: ReviewItem): number {
-  const title = item.title + " " + item.category;
-  const core = /配置|動線|室內外|入口|廣場|公共空間|人車分流|空間/.test(title) ? 40 : 0;
-  const severity = { high: 25, medium: 16, low: 4, info: 0 }[item.severity];
-  const confidence = 12 * Math.max(0, Math.min(1, item.evidenceConfidence ?? item.confidence));
-  const location = item.locationUnresolved ? -22 : 8 * Math.max(0, Math.min(1, item.locationConfidence ?? 0.5));
-  return core + severity + confidence + location;
+/** Short, factual explanation of why the selected problem is eligible and prioritized. */
+export function revisionSelectionReason(item: ReviewItem): string {
+  const label = item.severity === "high" ? "通關風險" : "核心問題";
+  const score = impact(item.scoreImpact);
+  return label + "優先；" +
+    (score ? "關聯分數影響 " + score + " 分；" : "分數影響未量化；") +
+    "證據信心 " + Math.round(confidence(item.evidenceConfidence ?? item.confidence) * 100) +
+    "%、定位信心 " + Math.round(confidence(item.locationConfidence) * 100) + "%，且有可定位的設計修改建議。";
 }
 
 export function createRevisionBrief(issue: ReviewItem): RevisionBrief {
@@ -70,4 +89,15 @@ export function cropBounds(box: NormalizedBBox) {
   const x1 = clamp(box.x + box.w + padx);
   const y1 = clamp(box.y + box.h + pady);
   return { x0, y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** ROI coordinates normalized within the padded/clamped crop shown on the right. */
+export function roiWithinCrop(box: NormalizedBBox): NormalizedBBox {
+  const bounds = cropBounds(box);
+  const unit = (value: number) => Math.max(0, Math.min(1, value));
+  const x = unit((box.x - bounds.x0) / bounds.w);
+  const y = unit((box.y - bounds.y0) / bounds.h);
+  const right = unit((box.x + box.w - bounds.x0) / bounds.w);
+  const bottom = unit((box.y + box.h - bounds.y0) / bounds.h);
+  return { x, y, w: right - x, h: bottom - y };
 }
