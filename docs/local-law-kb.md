@@ -38,7 +38,7 @@
 
 ## 建庫與檢索
 
-Node.js 22.16+ 或 Node 24（使用內建 `node:sqlite` 與 `--experimental-strip-types`，不安裝任何 SQLite 原生相依套件）：
+Node.js 22.16+ 或 Node 24（版本過舊會出現 `no such module: fts5`；使用內建 `node:sqlite` 與 `--experimental-strip-types`，不安裝任何 SQLite 原生相依套件）：
 
 ```sh
 npm ci
@@ -51,7 +51,7 @@ npm test
 
 `scripts/build-law-index.mjs` 以 Markdown 為權威重建 `knowledge/laws/laws.sqlite`。重建會清除 DB 中舊 embeddings，因此若已建立向量，請另行備份或重跑 embedding。全文檢索使用 FTS5 `unicode61`，在寫入與查詢時都切中文連續二字詞（bigram），以 OR 與 `bm25` 找候選。長短字詞並不保證語意判讀，應定期抽查結果及原文。
 
-**SQLite 改為本機產生，不再提交或由 CI 回寫。** 舊版已提交的 1,146,880 bytes（約 1.09 MiB）檔案依不刪檔規範移到 `legacy/laws.sqlite`，僅供歷史對照，**不可當成新索引使用**；原路徑 `knowledge/laws/laws.sqlite` 已加入 `.gitignore`。舊 `law-db-commit.yml` 亦移至 `legacy/law-db-commit.yml.disabled` 停用。執行 `npm run laws:build` 建庫；`npm run dev` 會透過 `predev` 自動重建。
+**SQLite 改為本機產生，不再提交或由 CI 回寫。** 舊版已提交的 1,146,880 bytes（約 1.09 MiB）檔案依不刪檔規範移到 `legacy/laws.sqlite`，僅供歷史對照，**不可當成新索引使用**；原路徑 `knowledge/laws/laws.sqlite` 已加入 `.gitignore`。舊 `law-db-commit.yml` 亦移至 `legacy/law-db-commit.yml.disabled` 停用。執行 `npm run laws:build` 建庫；`npm run dev` 會透過 `predev` 自動重建；建庫失敗只顯示警告，不會阻止 dev server 啟動（目前審圖尚未使用法規庫）。
 
 SQLite `articles` 保留全部 **401 條**，包含 `is_deleted=1` 的原文刪除條文；但 FTS5 僅索引 **非刪除條文的本文**，不加入章節、法規名稱或條號，避免刪除條文因 BM25 長度正規化污染排名。純文字查詢預設不回傳刪除條文；使用 `includeDeleted: true` 可對刪除條號直查或列出刪除條文，`getArticle()` 一律可查到其原文。本快照識別出 **49 條刪除條文**（含「（刪除）」與「（刪除）。」），不可自行推測歷史效力。搜尋品質評測集為 `tests/law-eval.json`（25 題）。
 
