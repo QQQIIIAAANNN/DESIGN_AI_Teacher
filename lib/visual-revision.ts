@@ -17,7 +17,7 @@ export type VisualRevisionSnapshot = {
 };
 
 const NON_VISUAL = /比例尺|圖名|圖號|指北針|標高標註|缺(?:少|漏)?(?:立面|剖面|平面|分析圖|圖紙)|未附(?:立面|剖面)|張數不足|缺圖|試題配分|計算書/i;
-const PRESENTATION_ONLY = /註記|標註|辨讀|字跡|線條|圖面清晰度|版面|圖面不清|圖面品質/i;
+const PRESENTATION_ONLY = /註記|標註(?:密集|過多|不清|太小)|辨讀|字跡|線條|圖面清晰度|版面|圖面不清|圖面品質/i;
 
 export function validRevisionBbox(b: NormalizedBBox): boolean {
   return [b.x, b.y, b.w, b.h].every((n) => Number.isFinite(n)) &&

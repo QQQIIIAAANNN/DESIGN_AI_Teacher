@@ -147,3 +147,11 @@ test("roiWithinCrop reconstructs the same normalized coordinates on normal, clam
   assert.equal(nearEdge.y, 0);
   assert.throws(() => roiWithinCrop({ x: -.01, y: 0, w: .3, h: .2 }));
 });
+
+test("a site-condition conflict that merely mentions 標註 stays eligible", () => {
+  const ranked = rankVisualRevisionIssues([
+    issue({ id: "road", title: "配置圖周邊道路寬度標註與題目基地條件不一致", category: "基地條件", severity: "high" }),
+    issue({ id: "dense", title: "標註密集難以辨讀", severity: "high" })
+  ]);
+  assert.deepEqual(ranked.map((item) => item.id), ["road"]);
+});
