@@ -2157,6 +2157,9 @@ html, body { background: var(--canvas); color: var(--ink); font-family: -apple-s
 .issue-severity-group.group-polish > summary::before { background: #54866d; }
 .issue-severity-group.group-good { border-color: #cce4d4; background: #f5fbf7; }
 .issue-severity-group.group-good > summary::before { background: #2f7a4b; }
+.issue-severity-group.group-demo { border-color: #c9d8e9; background: #f6f9ff; }
+.issue-severity-group.group-demo > summary::before { background: #3d6ea2; }
+.issue-severity-group.group-demo > summary small { display: block; }
 .issue-group-cards { display: grid; gap: 10px; padding: 0 10px 10px; }
 .issue-group-cards .issue-card { cursor: default; }
 

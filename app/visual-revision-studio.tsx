@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { DrawingReview, NormalizedBBox, ReviewItem } from "@/lib/review-schema";
-import { createRevisionBrief, rankVisualRevisionIssues, validRevisionBbox, type RevisionBrief, type VisualRevisionSnapshot } from "@/lib/visual-revision";
+import { createRevisionBrief, rankVisualRevisionIssues, revisionSelectionReason, roiWithinCrop, validRevisionBbox, type RevisionBrief, type VisualRevisionSnapshot } from "@/lib/visual-revision";
 import { compositeWithinRoi, cropPreview, prepareEditAssets, type EditFrame } from "@/lib/visual-revision-image";
 import { useRoiDrag } from "./use-roi-drag";
 import "./visual-revision.css";
@@ -41,6 +41,7 @@ export default function VisualRevisionStudio({ review, imageUrl, enabled, static
   const [version, setVersion] = useState(0);
   const [confirmed, setConfirmed] = useState<VisualRevisionSnapshot | null>(null);
   const [preview, setPreview] = useState("");
+  const [locatorAspect, setLocatorAspect] = useState<number | null>(null);
   const [status, setStatus] = useState<"idle" | "generating" | "error">("idle");
   const [error, setError] = useState("");
   const [history, setHistory] = useState<RevisionResult[]>([]);
@@ -48,6 +49,7 @@ export default function VisualRevisionStudio({ review, imageUrl, enabled, static
 
   const frozen = status === "generating";
   const brief = issue ? createRevisionBrief(issue) : null;
+  const cropRoi = roiWithinCrop(roi);
   const confirmedCurrent = Boolean(issue && confirmed && confirmed.issueId === issue.id &&
     confirmed.revision === version && sameBox(confirmed.bbox, roi));
   const chosenResult = history.find((entry) => entry.id === selectedHistoryId) || history[0];
@@ -126,27 +128,34 @@ export default function VisualRevisionStudio({ review, imageUrl, enabled, static
     }
   }
 
-  if (!issue || !brief) return <section className="visual-revision visual-revision-empty">
-    <h3>AI 改圖教學</h3>
-    <p>這次沒有可可靠定位、且適合視覺化改善的設計問題。缺圖、比例尺及純標註問題不會強行觸發生圖。</p>
-  </section>;
-
-  return <section className="visual-revision" aria-label="設計改善示範">
-    <div className="vr-title">
-      <div><p className="vr-eyebrow">DESIGN IMPROVEMENT</p><h3>AI 設計改善示範</h3></div>
-      <span>先確認位置，再生成</span>
-    </div>
-    <label className="vr-selector">最值得示範的設計問題
+  return <details className="issue-severity-group group-demo visual-revision" aria-label="AI 設計改善示範">
+    <summary>
+      <span><strong>AI 設計改善示範</strong><small>先確認修改位置，再生成 AI 視覺改善建議</small></span>
+      <b>{choices.length} 項</b>
+    </summary>
+    {!issue || !brief ? <div className="vr-content">
+      <p className="vr-message">目前沒有可可靠定位的高／中嚴重度設計問題可供示範，不會拿低嚴重度或純標註問題湊數。</p>
+    </div> : <div className="vr-content">
+    <label className="vr-selector">最嚴重的設計問題
       <select value={issue.id} onChange={(event) => changeIssue(event.target.value)} disabled={frozen}>
-        {choices.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.title}</option>)}
+        {choices.map((candidate) => <option key={candidate.id} value={candidate.id}>
+          {candidate.severity === "high" ? "【通關風險】" : "【核心問題】"}{candidate.title}
+        </option>)}
       </select>
     </label>
     <p className="vr-problem">{brief.problem}</p>
+    <p className="vr-selection-reason"><strong>入選理由：</strong>{revisionSelectionReason(issue)}</p>
     <div className="vr-preview-grid">
       <div>
         <strong>全圖定位與修改範圍</strong>
-        <div className="vr-locator">
-          <img src={imageUrl} alt="完整建築圖面，供確認 AI 選取的位置" />
+        <div className="vr-locator" style={locatorAspect ? { aspectRatio: locatorAspect } : undefined}>
+          <img src={imageUrl} alt="完整建築圖面，供確認 AI 選取的位置"
+            onLoad={(event) => {
+              const image = event.currentTarget;
+              if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                setLocatorAspect(image.naturalWidth / image.naturalHeight);
+              }
+            }} />
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img"
             aria-label="可拖曳、調整右下角或重畫修改範圍的 ROI 框"
             onPointerDown={drag.onPointerDown} onPointerMove={drag.onPointerMove}
@@ -162,8 +171,14 @@ export default function VisualRevisionStudio({ review, imageUrl, enabled, static
       </div>
       <div>
         <strong>局部裁切預覽</strong>
-        <div className="vr-crop">{preview ? <img src={preview} alt="目前 ROI 的局部裁切預覽" /> : <span>準備局部圖…</span>}</div>
-        <small>裁切保留周邊脈絡；由後端依確認的 ROI 產生遮罩。ROI 外會在前端合成時還原為原始像素。</small>
+        <div className="vr-crop">{preview ? <div className="vr-crop-image">
+          <img src={preview} alt="含周邊脈絡的局部裁切預覽，虛線框內才是實際修改範圍" />
+          <div className="vr-crop-roi" aria-hidden="true" style={{
+            left: `${cropRoi.x * 100}%`, top: `${cropRoi.y * 100}%`,
+            width: `${cropRoi.w * 100}%`, height: `${cropRoi.h * 100}%`
+          }} />
+        </div> : <span>準備局部圖…</span>}</div>
+        <small>虛線為修改範圍，外圈為 20% 周邊脈絡（貼圖邊緣時自動裁齊）。ROI 外會在前端合成時還原為原始像素。</small>
       </div>
     </div>
     <div className="vr-brief">
@@ -175,11 +190,11 @@ export default function VisualRevisionStudio({ review, imageUrl, enabled, static
       </details>
     </div>
     <div className="vr-actions">
-      <button type="button" onClick={() => onLocate(issue)} disabled={frozen}>在審圖大圖定位</button>
-      <button type="button" onClick={confirm} disabled={frozen || !validRevisionBbox(roi)}>
+      <button type="button" className="practice-action" onClick={() => onLocate(issue)} disabled={frozen}>在審圖大圖定位</button>
+      <button type="button" className="practice-action" onClick={confirm} disabled={frozen || !validRevisionBbox(roi)}>
         {confirmedCurrent ? "✓ 已確認修改位置" : "確認修改位置"}
       </button>
-      <button type="button" className="vr-primary" onClick={() => void generate()}
+      <button type="button" className="focus-drawing-action" onClick={() => void generate()}
         disabled={!confirmedCurrent || !enabled || frozen}>
         {frozen ? "AI 正在生成示範…" : "生成 AI 改圖示範"}
       </button>
@@ -202,5 +217,6 @@ export default function VisualRevisionStudio({ review, imageUrl, enabled, static
       <p><b>Revision Brief：</b>{chosenResult.brief.designGoal}。{chosenResult.brief.modifications.join("；")}。</p>
       <p className="vr-message">此為概念性示意，尚未經 Vision Critic 驗證；ROI 以外為原始裁切像素，仍需人工核對尺寸與法規。</p>
     </div>}
-  </section>;
+    </div>}
+  </details>;
 }
