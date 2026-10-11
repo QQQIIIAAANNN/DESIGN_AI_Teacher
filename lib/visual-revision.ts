@@ -16,7 +16,6 @@ export type VisualRevisionSnapshot = {
   brief: RevisionBrief;
 };
 
-const DESIGN = /配置|空間|動線|分流|入口|廣場|戶外|中庭|景觀|植栽|綠帶|街廓|廊道|梯廳|開口|門窗|牆|鋪面|退縮|停留|採光|通風|使用關係|量體|人車|基地|道路|題意|停車|建築線|防火|避難/i;
 const NON_VISUAL = /比例尺|圖名|圖號|指北針|標高標註|缺(?:少|漏)?(?:立面|剖面|平面|分析圖|圖紙)|未附(?:立面|剖面)|張數不足|缺圖|試題配分|計算書/i;
 const PRESENTATION_ONLY = /註記|標註|辨讀|字跡|線條|圖面清晰度|版面|圖面不清|圖面品質/i;
 
@@ -37,11 +36,10 @@ function impact(value: number | null): number {
 /** Severity is the primary key, never a small additive preference behind design keywords. */
 export function rankVisualRevisionIssues(items: ReviewItem[]): ReviewItem[] {
   return items.filter((item) => {
-    const text = [item.title, item.category, item.description, item.suggestion].join(" ");
     const shortText = [item.title, item.category].join(" ");
     return item.kind === "issue" && (item.severity === "high" || item.severity === "medium") &&
       item.visibilityStatus !== "illegible" && !item.locationUnresolved &&
-      Boolean(item.suggestion.trim()) && DESIGN.test(text) &&
+      Boolean(item.suggestion.trim()) &&
       !NON_VISUAL.test(shortText) && !PRESENTATION_ONLY.test(shortText) &&
       validRevisionBbox(item.bbox);
   }).sort((a, b) =>
