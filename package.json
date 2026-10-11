@@ -13,7 +13,7 @@
     "laws:build": "node --experimental-strip-types scripts/build-law-index.mjs",
     "laws:search": "node --experimental-strip-types scripts/search-laws.mjs",
     "laws:embed": "node --experimental-strip-types scripts/embed-laws.mjs",
-    "predev": "npm run laws:build"
+    "predev": "npm run laws:build || echo [warn] law index not built - the app still starts, see docs/local-law-kb.md"
   },
   "dependencies": {
     "next": "^15.5.0",

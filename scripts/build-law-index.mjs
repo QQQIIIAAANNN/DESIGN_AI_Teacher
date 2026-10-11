@@ -42,5 +42,11 @@ if (process.argv[1] && import.meta.url === new URL("file://" + resolve(process.a
   const idx = process.argv.indexOf("--db");
   buildLawIndex(idx >= 0 ? resolve(process.argv[idx+1]) : undefined)
     .then((count) => console.log("Law index ready: " + count + " articles"))
-    .catch((error) => { console.error("Law index failed:", error.message); process.exitCode = 1; });
+    .catch((error) => {
+      console.error("Law index failed:", error.message);
+      if (/fts5/i.test(error.message)) {
+        console.error("此 Node (" + process.version + ") 內建的 SQLite 不含 FTS5，請升級到 Node 22.16+ 或 24 LTS。");
+      }
+      process.exitCode = 1;
+    });
 }
